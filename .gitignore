@@ -1,0 +1,30 @@
+node_modules/
+.next/
+frontend-nextjs/node_modules/
+frontend-nextjs/.next/
+
+# Python
+__pycache__/
+*.pyc
+.env
+.venv/
+
+# Large / unnecessary files
+*.zip
+*.pdf
+*.glb
+*.log
+temp_pdf_imgs/
+stage1_outputs/
+notebooks/
+
+# OS / invalid
+nul
+*/nul
+.env
+*.json
+
+# or more precise:
+sample_chunks.json
+*_chunks.json
+*_outputs.json

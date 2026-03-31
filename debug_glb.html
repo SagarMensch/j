@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>GLB Deep Debug</title>
+    <style>
+        body { background: #111; color: #0f0; font-family: monospace; padding: 20px; font-size: 13px; white-space: pre-wrap; }
+        h2 { color: #ff0; margin-top: 20px; }
+        .error { color: #f00; }
+        .warn { color: #fa0; }
+        .ok { color: #0f0; }
+    </style>
+</head>
+<body>
+<h2>GLB Deep Debug Inspector</h2>
+<div id="log"></div>
+
+<script type="importmap">
+{
+    "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const logDiv = document.getElementById('log');
+function log(msg, cls = '') {
+    const span = document.createElement('span');
+    span.className = cls;
+    span.textContent = msg + '\n';
+    logDiv.appendChild(span);
+}
+
+function inspectGLTF(name, gltf) {
+    log(`\n========== ${name} ==========`, 'ok');
+    
+    // Scene structure
+    log(`\nScene children: ${gltf.scene.children.length}`);
+    
+    function dumpTree(obj, indent = '') {
+        let info = `${indent}${obj.type}: "${obj.name}"`;
+        if (obj.isSkinnedMesh) {
+            info += ` [SkinnedMesh, skeleton.bones=${obj.skeleton?.bones?.length}]`;
+            // Check if bind matrix is identity
+            const geom = obj.geometry;
+            if (geom) {
+                geom.computeBoundingBox();
+                const bb = geom.boundingBox;
+                info += ` geomBB=[${bb.min.x.toFixed(1)},${bb.min.y.toFixed(1)},${bb.min.z.toFixed(1)} → ${bb.max.x.toFixed(1)},${bb.max.y.toFixed(1)},${bb.max.z.toFixed(1)}]`;
+            }
+        }
+        if (obj.isMesh && !obj.isSkinnedMesh) {
+            const geom = obj.geometry;
+            if (geom) {
+                geom.computeBoundingBox();
+                const bb = geom.boundingBox;
+                info += ` [Mesh] geomBB=[${bb.min.x.toFixed(1)},${bb.min.y.toFixed(1)},${bb.min.z.toFixed(1)} → ${bb.max.x.toFixed(1)},${bb.max.y.toFixed(1)},${bb.max.z.toFixed(1)}]`;
+            }
+        }
+        if (obj.isBone) {
+            info += ` [Bone] pos=(${obj.position.x.toFixed(2)},${obj.position.y.toFixed(2)},${obj.position.z.toFixed(2)})`;
+        }
+        if (obj.position && (obj.position.x !== 0 || obj.position.y !== 0 || obj.position.z !== 0)) {
+            if (!obj.isBone) info += ` pos=(${obj.position.x.toFixed(2)},${obj.position.y.toFixed(2)},${obj.position.z.toFixed(2)})`;
+        }
+        if (obj.scale && (obj.scale.x !== 1 || obj.scale.y !== 1 || obj.scale.z !== 1)) {
+            info += ` scale=(${obj.scale.x.toFixed(4)},${obj.scale.y.toFixed(4)},${obj.scale.z.toFixed(4)})`;
+        }
+        log(info);
+        for (const child of obj.children) {
+            dumpTree(child, indent + '  ');
+        }
+    }
+    dumpTree(gltf.scene);
+    
+    // Bounding box test
+    log(`\nBounding Box Analysis:`);
+    const box = new THREE.Box3().setFromObject(gltf.scene);
+    const size = box.getSize(new THREE.Vector3());
+    log(`  Box3.setFromObject: min=(${box.min.x.toFixed(2)},${box.min.y.toFixed(2)},${box.min.z.toFixed(2)}) max=(${box.max.x.toFixed(2)},${box.max.y.toFixed(2)},${box.max.z.toFixed(2)})`);
+    log(`  Size: ${size.x.toFixed(2)} x ${size.y.toFixed(2)} x ${size.z.toFixed(2)}`);
+    
+    if (size.x === 0 && size.y === 0 && size.z === 0) {
+        log(`  ⚠️ ZERO SIZE! Box3.setFromObject failed for SkinnedMesh. Trying manual approach...`, 'warn');
+        
+        // Manual bounding box from geometry
+        const manualBox = new THREE.Box3();
+        let foundMesh = false;
+        gltf.scene.traverse(child => {
+            if (child.isMesh || child.isSkinnedMesh) {
+                foundMesh = true;
+                const geom = child.geometry;
+                geom.computeBoundingBox();
+                const bb = geom.boundingBox.clone();
+                
+                // For skinned meshes, we need to compute from the bind pose or posed position
+                // The geometry bounding box is in local/bind space
+                log(`  Mesh "${child.name}" local BB: min=(${bb.min.x.toFixed(2)},${bb.min.y.toFixed(2)},${bb.min.z.toFixed(2)}) max=(${bb.max.x.toFixed(2)},${bb.max.y.toFixed(2)},${bb.max.z.toFixed(2)})`);
+                
+                // Try computing from vertex positions directly
+                const pos = geom.getAttribute('position');
+                if (pos) {
+                    let minY = Infinity, maxY = -Infinity;
+                    let minX = Infinity, maxX = -Infinity;
+                    let minZ = Infinity, maxZ = -Infinity;
+                    for (let i = 0; i < pos.count; i++) {
+                        const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+                        if (x < minX) minX = x; if (x > maxX) maxX = x;
+                        if (y < minY) minY = y; if (y > maxY) maxY = y;
+                        if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+                    }
+                    log(`  Vertex extents: X=[${minX.toFixed(2)},${maxX.toFixed(2)}] Y=[${minY.toFixed(2)},${maxY.toFixed(2)}] Z=[${minZ.toFixed(2)},${maxZ.toFixed(2)}]`);
+                    log(`  Vertex size: ${(maxX-minX).toFixed(2)} x ${(maxY-minY).toFixed(2)} x ${(maxZ-minZ).toFixed(2)}`);
+                    manualBox.expandByPoint(new THREE.Vector3(minX, minY, minZ));
+                    manualBox.expandByPoint(new THREE.Vector3(maxX, maxY, maxZ));
+                }
+                
+                // Check skinning info
+                if (child.isSkinnedMesh) {
+                    log(`  Skeleton bones: ${child.skeleton.bones.length}`);
+                    log(`  Bind mode: ${child.bindMode}`);
+                    // Check the bind matrix
+                    const bm = child.bindMatrix;
+                    const elements = bm.elements;
+                    log(`  Bind matrix diagonal: [${elements[0].toFixed(4)}, ${elements[5].toFixed(4)}, ${elements[10].toFixed(4)}, ${elements[15].toFixed(4)}]`);
+                    
+                    // Check root bone position
+                    if (child.skeleton.bones.length > 0) {
+                        const rootBone = child.skeleton.bones[0];
+                        log(`  Root bone "${rootBone.name}" worldPos: (${rootBone.position.x.toFixed(2)},${rootBone.position.y.toFixed(2)},${rootBone.position.z.toFixed(2)})`);
+                    }
+                    
+                    // Try computeBoundingBox on the skinned mesh
+                    try {
+                        child.geometry.computeBoundingSphere();
+                        const sphere = child.geometry.boundingSphere;
+                        log(`  Bounding sphere: center=(${sphere.center.x.toFixed(2)},${sphere.center.y.toFixed(2)},${sphere.center.z.toFixed(2)}) radius=${sphere.radius.toFixed(2)}`);
+                    } catch(e) {
+                        log(`  BoundingSphere error: ${e.message}`, 'error');
+                    }
+                }
+            }
+        });
+        
+        if (foundMesh) {
+            const manualSize = manualBox.getSize(new THREE.Vector3());
+            log(`\n  📏 Manual total size: ${manualSize.x.toFixed(2)} x ${manualSize.y.toFixed(2)} x ${manualSize.z.toFixed(2)}`, 'ok');
+        }
+    }
+    
+    // Animations
+    log(`\nAnimations: ${gltf.animations.length}`);
+    gltf.animations.forEach((clip, i) => {
+        log(`  [${i}] "${clip.name}" duration=${clip.duration.toFixed(2)}s tracks=${clip.tracks.length}`);
+        // Sample first 5 tracks
+        clip.tracks.slice(0, 5).forEach((track, j) => {
+            log(`    Track[${j}]: "${track.name}" type=${track.constructor.name} keys=${track.times.length} timeRange=[${track.times[0]?.toFixed(3)},${track.times[track.times.length-1]?.toFixed(3)}]`);
+        });
+        if (clip.tracks.length > 5) log(`    ... and ${clip.tracks.length - 5} more tracks`);
+    });
+    
+    // Test animation playback
+    log(`\nAnimation Playback Test:`);
+    const scene2 = gltf.scene.clone(true);
+    const mixer = new THREE.AnimationMixer(gltf.scene);
+    
+    if (gltf.animations.length > 0) {
+        const clip = gltf.animations[0];
+        const action = mixer.clipAction(clip);
+        action.play();
+        
+        // Advance a few frames
+        for (let i = 0; i < 10; i++) {
+            mixer.update(1/30);
+        }
+        
+        // Check if bones moved
+        const bonesBefore = [];
+        const bonesAfter = [];
+        gltf.scene.traverse(n => {
+            if (n.isBone && n.name.includes('Hips')) {
+                bonesAfter.push({ name: n.name, pos: n.position.clone(), rot: n.quaternion.clone() });
+            }
+        });
+        
+        if (bonesAfter.length > 0) {
+            const hip = bonesAfter[0];
+            log(`  After 10 frames: ${hip.name} pos=(${hip.pos.x.toFixed(4)},${hip.pos.y.toFixed(4)},${hip.pos.z.toFixed(4)}) rot=(${hip.rot.x.toFixed(4)},${hip.rot.y.toFixed(4)},${hip.rot.z.toFixed(4)},${hip.rot.w.toFixed(4)})`);
+        }
+        log(`  Action isRunning: ${action.isRunning()}`, action.isRunning() ? 'ok' : 'error');
+    }
+    
+    // SkinnedMesh specific checks
+    log(`\nSkinnedMesh Checks:`);
+    gltf.scene.traverse(child => {
+        if (child.isSkinnedMesh) {
+            log(`  "${child.name}":`);
+            log(`    visible: ${child.visible}`);
+            log(`    frustumCulled: ${child.frustumCulled}`);
+            log(`    matrixWorldNeedsUpdate: ${child.matrixWorldNeedsUpdate}`);
+            
+            // Check if the skeleton is shared or separate
+            const skel = child.skeleton;
+            log(`    skeleton.boneMatrices length: ${skel.boneMatrices?.length}`);
+            log(`    skeleton.boneTexture: ${skel.boneTexture ? 'yes' : 'no'}`);
+            
+            // Check world transforms
+            child.updateMatrixWorld(true);
+            const wp = new THREE.Vector3();
+            child.getWorldPosition(wp);
+            log(`    world position: (${wp.x.toFixed(2)},${wp.y.toFixed(2)},${wp.z.toFixed(2)})`);
+            
+            const ws = new THREE.Vector3();
+            child.getWorldScale(ws);
+            log(`    world scale: (${ws.x.toFixed(4)},${ws.y.toFixed(4)},${ws.z.toFixed(4)})`);
+        }
+    });
+}
+
+const loader = new GLTFLoader();
+
+log('Loading idle.glb...');
+loader.load('./idle.glb', (gltf) => {
+    inspectGLTF('idle.glb', gltf);
+    
+    log('\n\nLoading talking.glb...');
+    loader.load('./talking.glb', (talkGltf) => {
+        inspectGLTF('talking.glb', talkGltf);
+        
+        // Cross-check: compare bone structures
+        log('\n\n========== CROSS-CHECK ==========');
+        const idleBones = [];
+        const talkBones = [];
+        gltf.scene.traverse(n => { if (n.isBone) idleBones.push(n.name); });
+        talkGltf.scene.traverse(n => { if (n.isBone) talkBones.push(n.name); });
+        
+        log(`Idle bones: ${idleBones.length}, Talk bones: ${talkBones.length}`);
+        
+        // Find mismatches
+        const idleSet = new Set(idleBones);
+        const talkSet = new Set(talkBones);
+        const onlyInIdle = idleBones.filter(b => !talkSet.has(b));
+        const onlyInTalk = talkBones.filter(b => !idleSet.has(b));
+        
+        if (onlyInIdle.length > 0) log(`Bones only in idle: ${onlyInIdle.join(', ')}`, 'warn');
+        if (onlyInTalk.length > 0) log(`Bones only in talk: ${onlyInTalk.join(', ')}`, 'warn');
+        if (onlyInIdle.length === 0 && onlyInTalk.length === 0) log(`All bone names match! ✅`, 'ok');
+        
+        // Check if talk animation tracks target bones in idle
+        if (talkGltf.animations.length > 0) {
+            const talkTracks = talkGltf.animations[0].tracks;
+            let matchCount = 0;
+            let mismatchCount = 0;
+            const mismatches = [];
+            for (const track of talkTracks) {
+                const boneName = track.name.split('.')[0];
+                if (idleSet.has(boneName)) {
+                    matchCount++;
+                } else {
+                    mismatchCount++;
+                    if (mismatches.length < 5) mismatches.push(boneName);
+                }
+            }
+            log(`\nTalk animation tracks targeting idle bones: ${matchCount}/${talkTracks.length} match`);
+            if (mismatchCount > 0) {
+                log(`Mismatched bone names in talk tracks: ${mismatches.join(', ')}${mismatchCount > 5 ? '...' : ''}`, 'warn');
+            }
+        }
+        
+        log('\n\n✅ Debug complete!');
+    }, 
+    (progress) => { /* progress */ },
+    (error) => { log(`Error loading talking.glb: ${error.message}`, 'error'); });
+},
+(progress) => { if (progress.loaded) log(`  idle.glb: ${(progress.loaded/1024/1024).toFixed(1)}MB loaded`); },
+(error) => { log(`Error loading idle.glb: ${error.message}`, 'error'); });
+</script>
+</body>
+</html>
+</CodeContent>
+<parameter name="EmptyFile">false

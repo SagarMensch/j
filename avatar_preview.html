@@ -1,0 +1,1336 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Jubilant Ingrevia — AI Plant Assistant</title>
+        <link
+            href="https://fonts.googleapis.com/css2?family=Figtree:wght@300;400;500;600;700&display=swap"
+            rel="stylesheet"
+        />
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            body {
+                font-family: "Figtree", sans-serif;
+                background: #f8f9fa;
+                color: #202124;
+                overflow: hidden;
+                height: 100vh;
+            }
+            .top-bar {
+                position: fixed;
+                top: 0;
+                right: 0;
+                left: 380px;
+                z-index: 100;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 14px 28px;
+                background: rgba(255, 255, 255, 0.9);
+                backdrop-filter: blur(12px);
+                border-bottom: 1px solid #e0e0e0;
+            }
+            .logo {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            .logo-mark {
+                width: 32px;
+                height: 32px;
+                border-radius: 6px;
+                background: #1a73e8;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-weight: 700;
+                font-size: 13px;
+                color: #fff;
+            }
+            .logo-text {
+                font-size: 15px;
+                font-weight: 600;
+                color: #202124;
+            }
+            .logo-text span {
+                font-weight: 400;
+                color: #5f6368;
+            }
+            .status-badge {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                background: #f1f3f4;
+                border: 1px solid #dadce0;
+                padding: 6px 12px;
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: 600;
+                color: #5f6368;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+            .status-dot {
+                width: 6px;
+                height: 6px;
+                border-radius: 50%;
+                background: #34a853;
+            }
+
+            #avatar-canvas {
+                position: absolute;
+                left: 380px;
+                top: 0;
+                width: calc(100vw - 380px);
+                height: 100vh;
+                display: block;
+            }
+
+            .btn {
+                padding: 8px 16px;
+                border: 1px solid #dadce0;
+                background: #fff;
+                color: #5f6368;
+                border-radius: 6px;
+                cursor: pointer;
+                font-family: "Figtree", sans-serif;
+                font-size: 12px;
+                font-weight: 500;
+                transition: all 0.15s ease;
+            }
+            .btn:hover {
+                background: #f8f9fa;
+                color: #202124;
+                border-color: #bdc1c6;
+            }
+            .btn.active {
+                background: #e8f0fe;
+                color: #1967d2;
+                border-color: #d2e3fc;
+                font-weight: 600;
+            }
+            .hint {
+                text-align: center;
+                color: #80868b;
+                font-size: 11px;
+                margin-top: 10px;
+            }
+
+            /* Chat Panel */
+            .chat-panel {
+                position: fixed;
+                left: 0;
+                top: 0;
+                bottom: 0;
+                width: 380px;
+                z-index: 100;
+                background: #ffffff;
+                border-right: 1px solid #e0e0e0;
+                box-shadow: 2px 0 8px rgba(0, 0, 0, 0.03);
+                display: flex;
+                flex-direction: column;
+            }
+            .chat-header {
+                padding: 20px 24px;
+                border-bottom: 1px solid #e0e0e0;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
+            .chat-header h3 {
+                font-size: 16px;
+                font-weight: 600;
+                color: #202124;
+            }
+            .chat-status {
+                font-size: 12px;
+                font-weight: 500;
+                color: #5f6368;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            }
+            .chat-status .dot {
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: #34a853;
+            }
+            .chat-status.thinking .dot {
+                background: #fbbc04;
+                animation: pulse 1s infinite;
+            }
+            .chat-status.speaking .dot {
+                background: #4285f4;
+                animation: pulse 0.5s infinite;
+            }
+            .chat-status.recording .dot {
+                background: #ea4335;
+                animation: pulse 0.5s infinite;
+            }
+            @keyframes pulse {
+                0%,
+                100% {
+                    opacity: 1;
+                }
+                50% {
+                    opacity: 0.4;
+                }
+            }
+
+            .chat-messages {
+                flex: 1;
+                overflow-y: auto;
+                padding: 20px 24px;
+                display: flex;
+                flex-direction: column;
+                gap: 16px;
+            }
+            .msg {
+                max-width: 90%;
+                padding: 12px 16px;
+                border-radius: 12px;
+                font-size: 14px;
+                line-height: 1.5;
+                word-wrap: break-word;
+            }
+            .msg.user {
+                align-self: flex-end;
+                background: #e8f0fe;
+                color: #1967d2;
+                border-bottom-right-radius: 4px;
+            }
+            .msg.assistant {
+                align-self: flex-start;
+                background: #f8f9fa;
+                color: #3c4043;
+                border-bottom-left-radius: 4px;
+                border: 1px solid #e8eaed;
+            }
+            .chat-input-bar {
+                padding: 16px 20px;
+                border-top: 1px solid #e0e0e0;
+                display: flex;
+                gap: 10px;
+                align-items: center;
+                background: #ffffff;
+            }
+            .chat-input {
+                flex: 1;
+                padding: 12px 16px;
+                border-radius: 24px;
+                background: #f1f3f4;
+                border: 1px solid transparent;
+                color: #202124;
+                font-family: "Figtree", sans-serif;
+                font-size: 14px;
+                outline: none;
+                transition:
+                    border-color 0.2s,
+                    background 0.2s;
+            }
+            .chat-input:focus {
+                background: #fff;
+                border-color: #1a73e8;
+                box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+            }
+            .chat-input::placeholder {
+                color: #5f6368;
+            }
+            .mic-btn {
+                width: 44px;
+                height: 44px;
+                border-radius: 50%;
+                background: #fff;
+                border: 1px solid #dadce0;
+                color: #5f6368;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 18px;
+                transition: all 0.2s;
+                flex-shrink: 0;
+            }
+            .mic-btn:hover {
+                background: #f8f9fa;
+                color: #202124;
+            }
+            .mic-btn.recording {
+                background: #ea4335;
+                border-color: #ea4335;
+                color: #fff;
+                animation: pulse 0.5s infinite;
+            }
+            .send-btn {
+                width: 44px;
+                height: 44px;
+                border-radius: 50%;
+                background: #1a73e8;
+                border: none;
+                color: #fff;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 18px;
+                font-weight: 700;
+                transition: all 0.2s;
+                flex-shrink: 0;
+            }
+            .send-btn:hover {
+                background: #1557b0;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+            }
+            .send-btn:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
+
+            /* Avatar controls row */
+            .avatar-controls {
+                padding: 12px 20px;
+                border-top: 1px solid #e0e0e0;
+                display: flex;
+                gap: 8px;
+                justify-content: center;
+                background: #fafafa;
+            }
+            .loading-overlay {
+                position: fixed;
+                inset: 0;
+                z-index: 200;
+                background: #f8f9fa;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                transition: opacity 0.5s ease;
+            }
+            .loading-overlay.hidden {
+                opacity: 0;
+                pointer-events: none;
+            }
+            .spinner {
+                width: 32px;
+                height: 32px;
+                border: 2px solid #222;
+                border-top: 2px solid #fff;
+                border-radius: 50%;
+                animation: spin 0.8s linear infinite;
+            }
+            @keyframes spin {
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+            .loading-label {
+                margin-top: 14px;
+                font-size: 14px;
+                font-weight: 500;
+                color: #5f6368;
+            }
+
+            #debug {
+                display: none; /* Hidden by default per user request */
+            }
+        </style>
+    </head>
+    <body>
+        <div class="loading-overlay" id="loading">
+            <div class="spinner"></div>
+            <div class="loading-label">Loading model...</div>
+        </div>
+
+        <div class="top-bar">
+            <div class="logo">
+                <div class="logo-mark">JI</div>
+                <div class="logo-text">
+                    Jubilant Ingrevia <span>· AI Assistant</span>
+                </div>
+            </div>
+            <div class="status-badge">
+                <div class="status-dot"></div>
+                Avatar Preview
+            </div>
+        </div>
+
+        <canvas id="avatar-canvas"></canvas>
+        <div id="debug"></div>
+
+        <!-- Chat Panel (left side) -->
+        <div class="chat-panel">
+            <div class="chat-header">
+                <h3>Plant Knowledge Assistant</h3>
+                <div class="chat-status" id="chat-status">
+                    <div class="dot"></div>
+                    <span>Ready</span>
+                </div>
+            </div>
+            <div class="chat-messages" id="chat-messages">
+                <div class="msg assistant">
+                    Namaste! I'm the Jubilant Ingrevia AI Plant Assistant. Ask
+                    me about SOPs, SMPs, or any plant procedures. You can type
+                    or use your microphone.
+                </div>
+            </div>
+            <div class="avatar-controls">
+                <button class="btn active" id="btn-view" title="Cycle view">
+                    Close-up
+                </button>
+                <button class="btn" id="btn-rotate">Auto Rotate</button>
+                <button class="btn" id="btn-reset">Reset</button>
+            </div>
+            <div class="chat-input-bar">
+                <button
+                    class="mic-btn"
+                    id="mic-btn"
+                    title="Click to start recording"
+                >
+                    <svg
+                        width="20"
+                        height="20"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path
+                            d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"
+                        ></path>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                        <line x1="12" y1="19" x2="12" y2="22"></line>
+                    </svg>
+                </button>
+                <input
+                    class="chat-input"
+                    id="chat-input"
+                    placeholder="Type your question..."
+                />
+                <button class="send-btn" id="send-btn" title="Send">
+                    <svg
+                        width="20"
+                        height="20"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <line x1="22" y1="2" x2="11" y2="13"></line>
+                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <script type="importmap">
+            {
+                "imports": {
+                    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+                }
+            }
+        </script>
+
+        <script type="module">
+            import * as THREE from "three";
+            import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+            import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+
+            const dbg = document.getElementById("debug");
+            function log(msg) {
+                console.log(msg);
+                dbg.textContent += msg + "\n";
+            }
+
+            let scene, camera, renderer, controls, model, mixer;
+            let actions = {}; // { name: THREE.AnimationAction }
+            let allClips = []; // all loaded clips
+            let currentAction = null;
+            let autoRotate = false;
+
+            // ── SCENE SETUP ──
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xf8f9fa);
+
+            const canvasWidth = window.innerWidth - 380; // account for left panel
+            camera = new THREE.PerspectiveCamera(
+                30,
+                canvasWidth / window.innerHeight,
+                0.01,
+                50000,
+            );
+            camera.position.set(0, 100, 500);
+
+            const canvas = document.getElementById("avatar-canvas");
+            renderer = new THREE.WebGLRenderer({
+                canvas,
+                antialias: true,
+                alpha: false,
+            });
+            renderer.setSize(canvasWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.0;
+            renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.06;
+            controls.target.set(0, 85, 0);
+            controls.minDistance = 10;
+            controls.maxDistance = 5000;
+
+            // ── LIGHTS ──
+            const keyLight = new THREE.DirectionalLight(0xffffff, 2.5);
+            keyLight.position.set(100, 300, 200);
+            keyLight.castShadow = true;
+
+            const fillLight = new THREE.DirectionalLight(0xffffff, 1.2);
+            fillLight.position.set(-100, 200, -200);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+
+            scene.add(keyLight);
+            scene.add(fillLight);
+            scene.add(ambientLight);
+
+            // Ground plane matching the light theme
+            const ground = new THREE.Mesh(
+                new THREE.PlaneGeometry(2000, 2000),
+                new THREE.MeshStandardMaterial({
+                    color: 0xe8eaed,
+                    depthWrite: false,
+                }),
+            );
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            scene.add(ground);
+
+            // ══════════════════════════════════════════════════════
+            //  CORE FIX: Compute bounding box for SkinnedMesh
+            //  Box3.setFromObject() is a KNOWN Three.js bug for SkinnedMesh
+            //  — it returns zero because it reads bind-pose geometry.
+            //  We compute from raw vertex positions instead.
+            // ══════════════════════════════════════════════════════
+            function computeModelBounds(root) {
+                const box = new THREE.Box3();
+                let vertexCount = 0;
+
+                root.updateMatrixWorld(true);
+
+                root.traverse((child) => {
+                    if (!child.isMesh && !child.isSkinnedMesh) return;
+                    const geom = child.geometry;
+                    if (!geom) return;
+                    const pos = geom.getAttribute("position");
+                    if (!pos) return;
+
+                    // Method 1: For SkinnedMesh, try boneTransform (accurate, but expensive)
+                    if (
+                        child.isSkinnedMesh &&
+                        typeof child.boneTransform === "function"
+                    ) {
+                        // Sample every Nth vertex for performance (full scan on small meshes)
+                        const step =
+                            pos.count > 10000
+                                ? Math.floor(pos.count / 5000)
+                                : 1;
+                        for (let i = 0; i < pos.count; i += step) {
+                            const v = new THREE.Vector3();
+                            child.boneTransform(i, v);
+                            v.applyMatrix4(child.matrixWorld);
+                            box.expandByPoint(v);
+                            vertexCount++;
+                        }
+                    } else {
+                        // Method 2: For regular mesh or fallback — use geometry positions + world matrix
+                        geom.computeBoundingBox();
+                        const localBox = geom.boundingBox.clone();
+                        localBox.applyMatrix4(child.matrixWorld);
+                        box.union(localBox);
+                        vertexCount += pos.count;
+                    }
+                });
+
+                log(`Bounds computed from ${vertexCount} vertices`);
+
+                // Safety check: if box is still empty/invalid, fall back to bone positions
+                if (box.isEmpty()) {
+                    log(
+                        "⚠️ Vertex bounds empty, falling back to bone positions",
+                    );
+                    root.traverse((child) => {
+                        if (child.isBone) {
+                            const wp = new THREE.Vector3();
+                            child.getWorldPosition(wp);
+                            box.expandByPoint(wp);
+                        }
+                    });
+                }
+
+                return box;
+            }
+
+            // ══════════════════════════════════════════════════════
+            //  CORE FIX: Smart animation selection
+            //  Don't blindly pick animations[0] — find by name
+            // ══════════════════════════════════════════════════════
+            function findAnimationByKeywords(animations, keywords) {
+                for (const kw of keywords) {
+                    const found = animations.find((a) =>
+                        a.name.toLowerCase().includes(kw.toLowerCase()),
+                    );
+                    if (found) return found;
+                }
+                return null;
+            }
+
+            function findLongestAnimation(animations) {
+                if (animations.length === 0) return null;
+                return animations.reduce(
+                    (longest, clip) =>
+                        clip.duration > longest.duration ? clip : longest,
+                    animations[0],
+                );
+            }
+
+            // ══════════════════════════════════════════════════════
+            //  Frame camera: CONVERSATIONAL medium shot (chest-up)
+            //  Like a real person on a video call
+            // ══════════════════════════════════════════════════════
+            function frameCamera(box, mode = "conversation") {
+                const size = box.getSize(new THREE.Vector3());
+                const center = box.getCenter(new THREE.Vector3());
+                const height = size.y;
+                const maxDim = Math.max(size.x, size.y, size.z);
+
+                let distance, targetY;
+
+                if (mode === "conversation") {
+                    // MEDIUM CLOSE-UP: target upper chest/neck, camera close
+                    targetY = box.min.y + height * 0.72; // upper chest / neck level
+                    distance = height * 0.45; // tightly framed close-up
+                } else if (mode === "halfbody") {
+                    // HALF BODY: waist-up view
+                    targetY = box.min.y + height * 0.62;
+                    distance = height * 0.8;
+                } else {
+                    // FULL BODY: see entire character
+                    targetY = center.y;
+                    distance = height * 1.6;
+                }
+
+                // Safety: ensure minimum distance
+                distance = Math.max(distance, 20);
+
+                controls.target.set(center.x, targetY, center.z);
+                camera.position.set(center.x, targetY, center.z + distance);
+                controls.update();
+
+                // Scale ground to model
+                ground.position.set(center.x, box.min.y, center.z);
+                ground.scale.setScalar(maxDim * 0.6);
+
+                log(
+                    `Camera [${mode}]: targetY=${targetY.toFixed(1)} dist=${distance.toFixed(1)}`,
+                );
+                log(
+                    `Model: height=${height.toFixed(1)} maxDim=${maxDim.toFixed(1)}`,
+                );
+            }
+
+            // Track current view mode for the reset button
+            let currentViewMode = "conversation";
+
+            // ══════════════════════════════════════════════════════
+            //  Remap bone names (Mixamo export naming inconsistency)
+            // ══════════════════════════════════════════════════════
+            function remapAnimationBones(animations, boneNames) {
+                const boneSet = new Set(boneNames);
+                let remapped = 0;
+
+                for (const clip of animations) {
+                    for (const track of clip.tracks) {
+                        const dot = track.name.indexOf(".");
+                        if (dot === -1) continue;
+                        const tBone = track.name.substring(0, dot);
+                        const prop = track.name.substring(dot);
+                        if (boneSet.has(tBone)) continue;
+
+                        let fixed = null;
+
+                        // "mixamorig9Hips" ↔ "mixamorig9:Hips" (colon variants)
+                        const m1 = tBone.match(/^(mixamorig\d*)(.*)/);
+                        if (m1) {
+                            const withColon = m1[1] + ":" + m1[2];
+                            const noColon = tBone.replace(/:/g, "");
+                            if (boneSet.has(withColon)) fixed = withColon;
+                            else if (boneSet.has(noColon)) fixed = noColon;
+                        }
+                        // Also try just removing/adding colons generically
+                        if (!fixed) {
+                            const noColon = tBone.replace(/:/g, "");
+                            if (boneSet.has(noColon)) fixed = noColon;
+                        }
+                        if (!fixed) {
+                            const withColon = tBone.replace(
+                                /(mixamorig\d*)/,
+                                "$1:",
+                            );
+                            if (boneSet.has(withColon)) fixed = withColon;
+                        }
+
+                        if (fixed) {
+                            track.name = fixed + prop;
+                            remapped++;
+                        }
+                    }
+                }
+                if (remapped > 0) log(`Remapped ${remapped} bone track names`);
+            }
+
+            // ══════════════════════════════════════════════════════
+            //  ANIMATION CROSSFADE
+            // ══════════════════════════════════════════════════════
+            function switchToAction(newAction) {
+                if (!newAction || newAction === currentAction) return;
+
+                if (currentAction) {
+                    currentAction.fadeOut(0.5);
+                }
+
+                newAction.reset();
+                newAction.fadeIn(0.5);
+                newAction.setLoop(THREE.LoopRepeat);
+                newAction.clampWhenFinished = false;
+                newAction.play();
+                currentAction = newAction;
+            }
+
+            // ══════════════════════════════════════════════════════
+            //  LOAD MODEL + ANIMATIONS
+            // ══════════════════════════════════════════════════════
+            const loader = new GLTFLoader();
+
+            log("Loading idle.glb...");
+
+            loader.load(
+                "./idle.glb",
+                (gltf) => {
+                    model = gltf.scene;
+
+                    // Prevent Three.js from culling the SkinnedMesh (causes disappearing)
+                    model.traverse((child) => {
+                        if (child.isSkinnedMesh || child.isMesh) {
+                            child.frustumCulled = false;
+                            child.castShadow = true;
+                            child.receiveShadow = true;
+                        }
+                    });
+
+                    // Collect bone names for remapping
+                    const boneNames = [];
+                    model.traverse((n) => {
+                        if (n.isBone) boneNames.push(n.name);
+                    });
+                    log(`Bones: ${boneNames.length}`);
+                    log(`First 5: ${boneNames.slice(0, 5).join(", ")}`);
+
+                    // Log ALL animations with names and durations
+                    log(`\nAnimations in idle.glb: ${gltf.animations.length}`);
+                    gltf.animations.forEach((clip, i) => {
+                        log(
+                            `  [${i}] "${clip.name}" dur=${clip.duration.toFixed(2)}s tracks=${clip.tracks.length}`,
+                        );
+                    });
+
+                    // Remap bones if needed
+                    remapAnimationBones(gltf.animations, boneNames);
+
+                    // Add model to scene
+                    scene.add(model);
+
+                    // ── FIX: Properly compute bounds using vertex-based approach ──
+                    const box = computeModelBounds(model);
+                    const size = box.getSize(new THREE.Vector3());
+                    log(
+                        `\nBounds: ${size.x.toFixed(1)} x ${size.y.toFixed(1)} x ${size.z.toFixed(1)}`,
+                    );
+
+                    // Center model on ground
+                    const center = box.getCenter(new THREE.Vector3());
+                    model.position.x -= center.x;
+                    model.position.z -= center.z;
+                    model.position.y -= box.min.y; // feet on ground
+
+                    // Re-compute bounds after repositioning
+                    const finalBox = computeModelBounds(model);
+                    frameCamera(finalBox);
+
+                    // ── Create mixer and pick the RIGHT animation ──
+                    mixer = new THREE.AnimationMixer(model);
+
+                    // Try to find idle animation by name, otherwise pick the first or longest
+                    const idleClip =
+                        findAnimationByKeywords(gltf.animations, [
+                            "idle",
+                            "breathing",
+                            "stand",
+                            "rest",
+                        ]) ||
+                        findLongestAnimation(gltf.animations) ||
+                        (gltf.animations.length > 0
+                            ? gltf.animations[0]
+                            : null);
+
+                    if (idleClip) {
+                        const action = mixer.clipAction(idleClip);
+                        actions["idle"] = action;
+                        currentAction = action;
+                        action.setLoop(THREE.LoopRepeat);
+                        action.clampWhenFinished = false;
+                        action.play();
+                        log(
+                            `\n✅ Playing idle: "${idleClip.name}" (${idleClip.duration.toFixed(2)}s)`,
+                        );
+                    } else {
+                        log(`\n⚠️ No animations found in idle.glb!`);
+                    }
+
+                    // Also register any other animations from idle.glb
+                    gltf.animations.forEach((clip) => {
+                        if (clip !== idleClip) {
+                            const key =
+                                clip.name.toLowerCase() ||
+                                `clip_${allClips.length}`;
+                            actions[key] = mixer.clipAction(clip);
+                        }
+                        allClips.push(clip);
+                    });
+
+                    // ── Load talking.glb ──
+                    log("\nLoading talking.glb...");
+                    loader.load(
+                        "./talking.glb",
+                        (talkGltf) => {
+                            log(
+                                `Animations in talking.glb: ${talkGltf.animations.length}`,
+                            );
+                            talkGltf.animations.forEach((clip, i) => {
+                                log(
+                                    `  [${i}] "${clip.name}" dur=${clip.duration.toFixed(2)}s tracks=${clip.tracks.length}`,
+                                );
+                            });
+
+                            // Remap bones for talk animations too
+                            remapAnimationBones(talkGltf.animations, boneNames);
+
+                            if (talkGltf.animations.length > 0) {
+                                // Find the best talk animation
+                                const talkClip =
+                                    findAnimationByKeywords(
+                                        talkGltf.animations,
+                                        [
+                                            "talk",
+                                            "speak",
+                                            "gesture",
+                                            "conversation",
+                                        ],
+                                    ) ||
+                                    findLongestAnimation(talkGltf.animations) ||
+                                    talkGltf.animations[0];
+
+                                // IMPORTANT: Create action on the IDLE model's mixer (shares skeleton)
+                                actions["talking"] = mixer.clipAction(talkClip);
+                                log(
+                                    `✅ Talk ready: "${talkClip.name}" (${talkClip.duration.toFixed(2)}s)`,
+                                );
+
+                                // Also load any other animations from talking.glb
+                                talkGltf.animations.forEach((clip) => {
+                                    if (clip !== talkClip) {
+                                        const key =
+                                            "talk_" +
+                                            (clip.name.toLowerCase() ||
+                                                `clip_${allClips.length}`);
+                                        actions[key] = mixer.clipAction(clip);
+                                    }
+                                    allClips.push(clip);
+                                });
+                            } else {
+                                log("⚠️ No animations in talking.glb!");
+                            }
+
+                            // Also try loading avatar.glb if it exists
+                            loader.load(
+                                "./avatar.glb",
+                                (avatarGltf) => {
+                                    log(
+                                        `\nAnimations in avatar.glb: ${avatarGltf.animations.length}`,
+                                    );
+                                    avatarGltf.animations.forEach((clip, i) => {
+                                        log(
+                                            `  [${i}] "${clip.name}" dur=${clip.duration.toFixed(2)}s tracks=${clip.tracks.length}`,
+                                        );
+                                    });
+                                    if (avatarGltf.animations.length > 0) {
+                                        remapAnimationBones(
+                                            avatarGltf.animations,
+                                            boneNames,
+                                        );
+                                        avatarGltf.animations.forEach(
+                                            (clip) => {
+                                                const key =
+                                                    "avatar_" +
+                                                    (clip.name.toLowerCase() ||
+                                                        `clip_${allClips.length}`);
+                                                actions[key] =
+                                                    mixer.clipAction(clip);
+                                                allClips.push(clip);
+                                            },
+                                        );
+                                        log("✅ Avatar animations loaded");
+                                    }
+                                    finishLoading();
+                                },
+                                undefined,
+                                () => {
+                                    // avatar.glb might not exist, that's fine
+                                    log("(avatar.glb not found, skipping)");
+                                    finishLoading();
+                                },
+                            );
+                        },
+                        undefined,
+                        (err) => {
+                            log(
+                                "⚠️ Failed to load talking.glb: " + err.message,
+                            );
+                            finishLoading();
+                        },
+                    );
+                },
+                (progress) => {
+                    if (progress.total > 0) {
+                        const pct = (
+                            (progress.loaded / progress.total) *
+                            100
+                        ).toFixed(0);
+                        document.querySelector(".loading-label").textContent =
+                            `Loading model... ${pct}%`;
+                    }
+                },
+                (err) => {
+                    log("❌ Failed to load idle.glb: " + err.message);
+                    log(
+                        "Make sure you are running via a local server (not file://)",
+                    );
+                    log("Try: npx serve . -p 8888");
+                },
+            );
+
+            function finishLoading() {
+                document.getElementById("loading").classList.add("hidden");
+                log(`\n════════════════════════`);
+                log(`Total actions: ${Object.keys(actions).length}`);
+                log(`Actions: ${Object.keys(actions).join(", ")}`);
+                log(`════════════════════════`);
+            }
+
+            // ── ANIMATION LOOP ──
+            const clock = new THREE.Clock();
+            function animate() {
+                requestAnimationFrame(animate);
+                const delta = clock.getDelta();
+                if (mixer) mixer.update(delta);
+                if (autoRotate && model) model.rotation.y += 0.003;
+                controls.update();
+                renderer.render(scene, camera);
+            }
+            animate();
+
+            // ── UI CONTROLS ──
+            document
+                .getElementById("btn-rotate")
+                .addEventListener("click", () => {
+                    autoRotate = !autoRotate;
+                    document
+                        .getElementById("btn-rotate")
+                        .classList.toggle("active");
+                });
+
+            // View mode cycle
+            const viewModes = ["conversation", "halfbody", "fullbody"];
+            const viewLabels = ["Close-up", "Half Body", "Full Body"];
+            let viewIndex = 0;
+            document
+                .getElementById("btn-view")
+                .addEventListener("click", () => {
+                    viewIndex = (viewIndex + 1) % viewModes.length;
+                    currentViewMode = viewModes[viewIndex];
+                    document.getElementById("btn-view").textContent =
+                        viewLabels[viewIndex];
+                    if (model) {
+                        const box = computeModelBounds(model);
+                        frameCamera(box, currentViewMode);
+                    }
+                });
+
+            document
+                .getElementById("btn-reset")
+                .addEventListener("click", () => {
+                    if (model) {
+                        const box = computeModelBounds(model);
+                        frameCamera(box, currentViewMode);
+                    }
+                });
+
+            document
+                .getElementById("btn-debug")
+                .addEventListener("click", () => {
+                    const d = document.getElementById("debug");
+                    d.style.display =
+                        d.style.display === "none" ? "block" : "none";
+                });
+
+            window.addEventListener("resize", () => {
+                const newCanvasWidth = window.innerWidth - 380;
+                camera.aspect = newCanvasWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(newCanvasWidth, window.innerHeight);
+            });
+
+            // ══════════════════════════════════════════════════════
+            //  VOICE PIPELINE: Chat + Microphone + Audio + Jaw Anim
+            // ══════════════════════════════════════════════════════
+
+            const BACKEND_URL = "http://localhost:8000";
+            let isSpeaking = false;
+            let jawBone = null;
+            let jawBaseRotation = null;
+            let audioAnalyser = null;
+            let audioContext = null;
+
+            // Find the jaw bone once model loads
+            function findJawBone() {
+                if (!model) return;
+                // Mixamo jaw bone names
+                const jawNames = [
+                    "mixamorig9Jaw",
+                    "mixamorig:Jaw",
+                    "Jaw",
+                    "jaw",
+                    "mixamorig9Head",
+                    "mixamorig:Head",
+                ];
+                for (const name of jawNames) {
+                    const bone = model.getObjectByName(name);
+                    if (bone) {
+                        jawBone = bone;
+                        jawBaseRotation = bone.rotation.clone();
+                        log(`🦴 Jaw/Head bone found: "${name}"`);
+                        return;
+                    }
+                }
+                log(
+                    "⚠️ No jaw/head bone found — using head rotation for lip sync",
+                );
+            }
+
+            // Drive the jaw open/close based on audio amplitude
+            function updateJawFromAudio() {
+                if (!jawBone || !audioAnalyser || !isSpeaking) {
+                    if (jawBone && jawBaseRotation) {
+                        // Smoothly return to rest
+                        jawBone.rotation.x +=
+                            (jawBaseRotation.x - jawBone.rotation.x) * 0.15;
+                    }
+                    return;
+                }
+
+                const data = new Uint8Array(audioAnalyser.frequencyBinCount);
+                audioAnalyser.getByteFrequencyData(data);
+
+                // Calculate volume (average amplitude)
+                let sum = 0;
+                for (let i = 0; i < data.length; i++) sum += data[i];
+                const avg = sum / data.length / 255; // 0 to 1
+
+                // Map volume to jaw rotation (mouth open)
+                const jawOpen = avg * 0.25; // max ~0.25 radians open
+                const targetX = jawBaseRotation.x + jawOpen;
+                jawBone.rotation.x += (targetX - jawBone.rotation.x) * 0.3; // smooth
+            }
+
+            // Set status indicator
+            function setStatus(state, text) {
+                const el = document.getElementById("chat-status");
+                el.className = "chat-status " + state;
+                el.querySelector("span").textContent = text;
+            }
+
+            // Add message to chat
+            function addMessage(role, text) {
+                const msgs = document.getElementById("chat-messages");
+                const div = document.createElement("div");
+                div.className = "msg " + role;
+                div.textContent = text;
+                msgs.appendChild(div);
+                msgs.scrollTop = msgs.scrollHeight;
+            }
+
+            // Play base64 audio and animate jaw
+            function playAudioResponse(base64Audio) {
+                return new Promise((resolve) => {
+                    if (!audioContext) {
+                        audioContext = new (
+                            window.AudioContext || window.webkitAudioContext
+                        )();
+                    }
+
+                    // Decode base64 to audio buffer
+                    const raw = atob(base64Audio);
+                    const bytes = new Uint8Array(raw.length);
+                    for (let i = 0; i < raw.length; i++)
+                        bytes[i] = raw.charCodeAt(i);
+
+                    audioContext.decodeAudioData(
+                        bytes.buffer,
+                        (buffer) => {
+                            const source = audioContext.createBufferSource();
+                            source.buffer = buffer;
+
+                            // Create analyser for jaw animation
+                            audioAnalyser = audioContext.createAnalyser();
+                            audioAnalyser.fftSize = 256;
+                            audioAnalyser.smoothingTimeConstant = 0.6;
+
+                            source.connect(audioAnalyser);
+                            audioAnalyser.connect(audioContext.destination);
+
+                            // Switch to talking animation
+                            isSpeaking = true;
+                            if (actions["talking"])
+                                switchToAction(actions["talking"]);
+                            setStatus("speaking", "Speaking...");
+
+                            source.onended = () => {
+                                isSpeaking = false;
+                                audioAnalyser = null;
+                                if (actions["idle"])
+                                    switchToAction(actions["idle"]);
+                                setStatus("", "Ready");
+                                resolve();
+                            };
+
+                            source.start();
+                        },
+                        (err) => {
+                            log("Audio decode error: " + err);
+                            isSpeaking = false;
+                            setStatus("", "Ready");
+                            resolve();
+                        },
+                    );
+                });
+            }
+
+            // ── SEND TEXT MESSAGE ──
+            async function sendTextMessage(text) {
+                if (!text.trim()) return;
+
+                addMessage("user", text);
+                document.getElementById("chat-input").value = "";
+                document.getElementById("send-btn").disabled = true;
+                setStatus("thinking", "Thinking...");
+
+                try {
+                    const resp = await fetch(`${BACKEND_URL}/api/chat`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            text: text,
+                            language: "en-IN",
+                            speaker: "suhani",
+                        }),
+                    });
+
+                    if (!resp.ok)
+                        throw new Error(`Backend error: ${resp.status}`);
+                    const data = await resp.json();
+
+                    addMessage("assistant", data.assistant_text);
+
+                    // Play audio response with jaw animation
+                    if (data.audio_base64) {
+                        await playAudioResponse(data.audio_base64);
+                    }
+                } catch (err) {
+                    log("Chat error: " + err.message);
+                    addMessage(
+                        "assistant",
+                        "⚠️ Could not reach backend. Make sure to run: cd backend && pip install -r requirements.txt && uvicorn server:app --port 8000",
+                    );
+                    setStatus("", "Error");
+                }
+
+                document.getElementById("send-btn").disabled = false;
+            }
+
+            // ── SEND BUTTON + ENTER KEY ──
+            document
+                .getElementById("send-btn")
+                .addEventListener("click", () => {
+                    sendTextMessage(
+                        document.getElementById("chat-input").value,
+                    );
+                });
+            document
+                .getElementById("chat-input")
+                .addEventListener("keydown", (e) => {
+                    if (e.key === "Enter") sendTextMessage(e.target.value);
+                });
+
+            // ── MICROPHONE RECORDING ──
+            let mediaRecorder = null;
+            let audioChunks = [];
+            let isRecording = false;
+
+            const micBtn = document.getElementById("mic-btn");
+            const micIcon =
+                '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="22"></line></svg>';
+            const stopIcon =
+                '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12"></rect></svg>';
+
+            micBtn.addEventListener("click", () => {
+                if (!isRecording) {
+                    startRecording();
+                } else {
+                    stopRecording();
+                }
+            });
+
+            async function startRecording() {
+                if (isRecording) return;
+
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        audio: true,
+                    });
+                    mediaRecorder = new MediaRecorder(stream, {
+                        mimeType: "audio/webm",
+                    });
+                    audioChunks = [];
+
+                    mediaRecorder.ondataavailable = (e) =>
+                        audioChunks.push(e.data);
+                    mediaRecorder.start();
+
+                    isRecording = true;
+                    micBtn.classList.add("recording");
+                    micBtn.innerHTML = stopIcon;
+                    micBtn.title = "Click to stop recording";
+                    setStatus("recording", "Listening...");
+                    log("Recorded voice started");
+                } catch (err) {
+                    log("Mic error: " + err.message);
+                    addMessage(
+                        "assistant",
+                        "⚠️ Microphone access denied. Please allow mic access.",
+                    );
+                }
+            }
+
+            async function stopRecording() {
+                if (!isRecording) return;
+                isRecording = false;
+
+                micBtn.classList.remove("recording");
+                micBtn.innerHTML = micIcon;
+                micBtn.title = "Click to start recording";
+
+                if (!mediaRecorder || mediaRecorder.state !== "recording")
+                    return;
+
+                mediaRecorder.stop();
+                mediaRecorder.stream.getTracks().forEach((t) => t.stop());
+
+                mediaRecorder.onstop = async () => {
+                    const blob = new Blob(audioChunks, { type: "audio/webm" });
+                    log(
+                        `Recorded voice stopped: ${(blob.size / 1024).toFixed(1)}KB`,
+                    );
+
+                    if (blob.size < 1000) {
+                        setStatus("", "Ready");
+                        return; // Too short
+                    }
+
+                    setStatus("thinking", "Processing speech...");
+
+                    try {
+                        const formData = new FormData();
+                        formData.append("audio", blob, "recording.webm");
+                        formData.append("language", "auto");
+                        formData.append("speaker", "suhani");
+
+                        const resp = await fetch(`${BACKEND_URL}/api/voice`, {
+                            method: "POST",
+                            body: formData,
+                        });
+
+                        if (!resp.ok)
+                            throw new Error(`Backend error: ${resp.status}`);
+                        const data = await resp.json();
+
+                        if (data.user_text) addMessage("user", data.user_text);
+                        if (data.assistant_text)
+                            addMessage("assistant", data.assistant_text);
+
+                        if (data.audio_base64) {
+                            await playAudioResponse(data.audio_base64);
+                        }
+                    } catch (err) {
+                        log("Voice error: " + err.message);
+                        addMessage(
+                            "assistant",
+                            "⚠️ Voice pipeline error. Make sure backend is running on port 8000.",
+                        );
+                        setStatus("", "Error");
+                    }
+                };
+            }
+
+            // ── HOOK JAW ANIMATION INTO RENDER LOOP ──
+            // Override the animate function to include jaw updates
+            const origAnimate = animate;
+            // We already have the animate loop, let's inject jaw update
+            // by finding the jaw bone after model loads
+            const checkJaw = setInterval(() => {
+                if (model && !jawBone) {
+                    findJawBone();
+                    clearInterval(checkJaw);
+                }
+            }, 1000);
+
+            // Inject jaw update into the render loop
+            const _origRAF = window.requestAnimationFrame;
+            let jawUpdateActive = true;
+            (function jawLoop() {
+                _origRAF(jawLoop);
+                updateJawFromAudio();
+            })();
+        </script>
+    </body>
+</html>
