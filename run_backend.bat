@@ -1,4 +1,12 @@
 @echo off
-cd /d "C:\Users\ratho\Sequelstring AI\ingrevia"
-set PYTHONPATH=C:\Users\ratho\Sequelstring AI\ingrevia
-"C:\Users\ratho\Sequelstring AI\ingrevia\.venv\Scripts\python.exe" -m uvicorn backend.server:app --host 0.0.0.0 --port 8000
+setlocal
+set "REPO_ROOT=%~dp0"
+
+if exist "%REPO_ROOT%.venv\Scripts\python.exe" (
+    set "PYTHON_EXE=%REPO_ROOT%.venv\Scripts\python.exe"
+) else (
+    set "PYTHON_EXE=python"
+)
+
+cd /d "%REPO_ROOT%backend"
+"%PYTHON_EXE%" -m uvicorn server:app --host 0.0.0.0 --port 8000

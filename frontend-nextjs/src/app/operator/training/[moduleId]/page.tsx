@@ -1,441 +1,521 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
-import Link from 'next/link';
-import { useParams, useSearchParams } from 'next/navigation';
-import { OperatorLayout } from '@/components/operator/operator-layout';
-import { Card } from '@/components/ui/card';
-import { StepProgress } from '@/components/ui/progress';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { trackEvent } from '@/lib/telemetry';
-import { useAuth } from '@/lib/auth-context';
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { OperatorLayout } from "@/components/operator/operator-layout";
+import { Card } from "@/components/ui/card";
+import { ProgressBar, StepProgress } from "@/components/ui/progress";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { apiClient } from "@/lib/api";
+import { trackEvent } from "@/lib/telemetry";
+import { useAuth } from "@/lib/auth-context";
 
-// SpeechRecognition types
-interface SpeechRecognitionEvent {
-  results: SpeechRecognitionResultList;
-}
-
-interface SpeechRecognitionResultList {
-  [index: number]: SpeechRecognitionResult;
-}
-
-interface SpeechRecognitionResult {
-  [index: number]: SpeechRecognitionAlternative;
-}
-
-interface SpeechRecognitionAlternative {
-  transcript: string;
-  confidence: number;
-}
-
-type SpeechRecognitionInstance = {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  onstart: (() => void) | null;
-  onend: (() => void) | null;
-  onresult: ((event: SpeechRecognitionEvent) => void) | null;
-  onerror: (() => void) | null;
-  start: () => void;
-  stop: () => void;
-};
-
-const moduleData: Record<string, {
+type ModuleSummary = {
+  id: string;
   title: string;
-  steps: { id: number; title: string; content: string; citation: string; page: number }[];
-}> = {
-  'mod-1': {
-    title: '23.SOP. Chemical Handling',
-    steps: [
-      { id: 1, title: 'Maximum Container Capacity', content: 'Key Safety Rule: The maximum capacity of a chemical container that is permitted to be hand-carried around the site is **20 litres**.\n\n• Containers exceeding 20 litres must be moved using appropriate mechanical aids\n• Always use proper lifting techniques\n• Ensure containers are properly sealed before transport', citation: '23.SOP. Chemical Handling', page: 1 },
-      { id: 2, title: 'Respiratory PPE Requirements', content: 'Required PPE for offloading, storing, and decanting hazardous materials:\n\n• A suitably rated respirator (NOT a dust mask)\n• Respirator must be appropriate for the specific chemical hazard\n• Regular fit testing and maintenance required\n• Dust masks are NOT acceptable for hazardous materials', citation: '23.SOP. Chemical Handling', page: 1 },
-      { id: 3, title: 'Empty Container Handling', content: 'All empty chemical containers must be:\n\n• Stored in specially demarcated and labelled areas\n• Never reused for any other purpose\n• Properly decontaminated before disposal\n• Kept separate from operational containers\n• Handled according to waste management procedures', citation: '23.SOP. Chemical Handling', page: 1 },
-    ],
-  },
-  'mod-2': {
-    title: '8-2-Chemical-Sampling-SOP-20220502',
-    steps: [
-      { id: 1, title: 'Stream Safety Assessment', content: 'The "Rule of Ten" for wading safety:\n\n• Multiply depth (in feet) by velocity (in ft/s)\n• If the product equals or exceeds 10, the stream is too dangerous to wade\n• Example: 2 ft depth × 5 ft/s = 10 (at the limit)\n• Always use alternative sampling methods when unsafe', citation: '8-2-Chemical-Sampling-SOP-20220502', page: 1 },
-      { id: 2, title: 'Sample Holding Times', content: 'Maximum holding times for preserved samples:\n\n• Dissolved metals (excluding mercury, boron, chromium VI): 6 months\n• Preserved with concentrated nitric acid\n• Proper temperature control required\n• Always check holding time before sample collection', citation: '8-2-Chemical-Sampling-SOP-20220502', page: 1 },
-      { id: 3, title: 'Quality Control Blanks', content: 'Trip Blank characteristics:\n\n• Prepared at the analytical facility\n• Transported WITH the environmental samples\n• Never exposed to ambient conditions at sampling site\n• Checks for contamination during transport only\n• Different from field blanks (exposed to site conditions)', citation: '8-2-Chemical-Sampling-SOP-20220502', page: 1 },
-    ],
-  },
-  'mod-3': {
-    title: 'SOPs for Hazardous Manufacturing Processes',
-    steps: [
-      { id: 1, title: 'Emergency Shower Water Supply', content: 'For factories with electrolytic plating or oxidation:\n\n• Required storage tank capacity: 1500 litres\n• Must provide continuous clean water supply\n• For emergency shower and eye fountain\n• Water must be readily accessible at all times\n• Regular testing of emergency equipment required', citation: 'SOPs for hazardous manufacturing processes', page: 1 },
-      { id: 2, title: 'Noise Exposure Limits', content: 'Maximum permissible sound pressure levels:\n\n• Continuous 8-hour exposure: 90 dBA\n• Higher levels require hearing protection\n• Regular monitoring required\n• Engineering controls preferred over PPE\n• Document exposure levels in safety records', citation: 'SOPs for hazardous manufacturing processes', page: 1 },
-      { id: 3, title: 'Aerated Waters Protection', content: 'For manufacture of aerated waters, workers filling bottles or syphons must be provided with:\n\n• Suitable gauntlets to protect arms and hands\n• Gauntlets must be in good condition\n• Regular inspection and replacement\n• Protection from glass shards and chemical exposure', citation: 'SOPs for hazardous manufacturing processes', page: 1 },
-    ],
-  },
+  description: string | null;
+  document_code: string | null;
+  document_title: string | null;
+  revision_label: string | null;
+  criticality: string;
+  total_steps: number;
 };
+
+type ModuleStep = {
+  id: string;
+  step_number: number;
+  title: string;
+  instruction: string;
+  voice_prompt: string | null;
+  operator_check: string | null;
+  citation_label: string | null;
+  page_start: number | null;
+  page_end: number | null;
+};
+
+type ModuleAssignment = {
+  assignment_id: string;
+  status: "assigned" | "in_progress" | "completed";
+  progress_percent: number;
+  current_step: number | null;
+};
+
+type AssessmentSummary = {
+  assessment_id: string;
+  assessment_title: string;
+  passing_score: number;
+  time_limit_seconds: number | null;
+  certification_label: string | null;
+};
+
+type ModuleResponse = {
+  module: ModuleSummary;
+  steps: ModuleStep[];
+  assignment: ModuleAssignment | null;
+  assessment: AssessmentSummary | null;
+};
+
+type ProgressResponse = {
+  assignment: ModuleAssignment;
+};
+
+function clampStep(stepIndex: number, totalSteps: number) {
+  if (totalSteps <= 0) return 0;
+  return Math.min(Math.max(stepIndex, 0), totalSteps - 1);
+}
 
 export default function TrainingModulePage() {
   const params = useParams();
+  const router = useRouter();
   const searchParams = useSearchParams();
+  const { user, language } = useAuth();
   const moduleId = params.moduleId as string;
-  const module = moduleData[moduleId] || moduleData['mod-1'];
+  const stepParam = searchParams.get("step");
+
+  const [payload, setPayload] = useState<ModuleResponse | null>(null);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isListening, setIsListening] = useState(false);
-  const [autoPlayEnabled, setAutoPlayEnabled] = useState(false);
-  const [inactivityWarning, setInactivityWarning] = useState(false);
-  const { language } = useAuth();
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const hasMarkedStartRef = useRef(false);
 
-  // Get step from URL if available
   useEffect(() => {
-    const stepParam = searchParams.get('step');
-    if (stepParam) {
-      const step = parseInt(stepParam, 10) - 1;
-      if (step >= 0 && step < module.steps.length) {
-        setCurrentStepIndex(step);
+    hasMarkedStartRef.current = false;
+  }, [moduleId]);
+
+  useEffect(() => {
+    if (!user?.id || !moduleId) {
+      setIsLoading(false);
+      return;
+    }
+
+    let isMounted = true;
+
+    async function loadModule() {
+      try {
+        trackEvent("ui.training_module_opened", { moduleId, userId: user.id });
+        const response = (await apiClient.get(
+          `/api/training/modules/${moduleId}?user_id=${user.id}`,
+        )) as ModuleResponse;
+
+        if (!isMounted) return;
+
+        const requestedStep = Number.parseInt(stepParam || "", 10);
+        const assignmentStep = (response.assignment?.current_step || 1) - 1;
+        const startingStep = Number.isFinite(requestedStep)
+          ? requestedStep - 1
+          : assignmentStep;
+
+        setPayload(response);
+        setCurrentStepIndex(clampStep(startingStep, response.steps.length));
+        setError("");
+      } catch (err) {
+        if (!isMounted) return;
+        setError(
+          err instanceof Error ? err.message : "Failed to load module details.",
+        );
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     }
-  }, [searchParams, module.steps.length]);
 
-  const currentStep = module.steps[currentStepIndex];
-
-  // Track step advancement
-  const advanceStep = useCallback((newIndex: number) => {
-    setCurrentStepIndex(newIndex);
-    trackEvent('ui.training_step_advanced', {
-      moduleId,
-      stepNumber: newIndex + 1,
-      totalSteps: module.steps.length,
-    });
-    if (autoPlayEnabled) {
-      setTimeout(() => handleSpeak(), 500);
-    }
-  }, [moduleId, module.steps.length, autoPlayEnabled]);
-
-  // Inactivity timeout (2 minutes)
-  useEffect(() => {
-    const inactivityTimer = setTimeout(() => {
-      setInactivityWarning(true);
-    }, 120000);
-
-    const resetInactivity = () => {
-      setInactivityWarning(false);
-      clearTimeout(inactivityTimer);
-    };
-
-    window.addEventListener('click', resetInactivity);
-    window.addEventListener('keydown', resetInactivity);
-
+    void loadModule();
     return () => {
-      clearTimeout(inactivityTimer);
-      window.removeEventListener('click', resetInactivity);
-      window.removeEventListener('keydown', resetInactivity);
+      isMounted = false;
+      speechSynthesis.cancel();
     };
-  }, []);
+  }, [moduleId, stepParam, user?.id]);
 
-  const handleSpeak = useCallback(() => {
-    if ('speechSynthesis' in window) {
-      const utterance = new SpeechSynthesisUtterance(currentStep.content);
-      utterance.lang = language === 'HIN' ? 'hi-IN' : language === 'HING' ? 'hi-IN' : 'en-IN';
-      utterance.rate = 0.9;
-      speechSynthesis.cancel();
-      setIsPlaying(true);
-      
-      utterance.onend = () => {
-        setIsPlaying(false);
-      };
-      
-      speechSynthesis.speak(utterance);
+  useEffect(() => {
+    if (!user?.id || !payload?.assignment || hasMarkedStartRef.current) {
+      return;
     }
-  }, [currentStep.content, language]);
-
-  const handleStopSpeak = () => {
-    if ('speechSynthesis' in window) {
-      speechSynthesis.cancel();
-      setIsPlaying(false);
-    }
-  };
-
-  // Voice command handling
-  const handleVoiceCommand = () => {
-    if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
-      alert('Voice commands not supported in this browser.');
+    if (payload.assignment.status !== "assigned") {
       return;
     }
 
-    if (isListening) {
-      setIsListening(false);
+    hasMarkedStartRef.current = true;
+    void apiClient
+      .post(
+        `/api/training/assignments/${payload.assignment.assignment_id}/progress`,
+        {
+          user_id: user.id,
+          progress_percent: Number(payload.assignment.progress_percent || 0),
+          current_step: Math.max(currentStepIndex + 1, 1),
+          status: "in_progress",
+        },
+      )
+      .then((response) => {
+        const nextAssignment = (response as ProgressResponse).assignment;
+        setPayload((current) =>
+          current ? { ...current, assignment: nextAssignment } : current,
+        );
+      })
+      .catch(() => {
+        hasMarkedStartRef.current = false;
+      });
+  }, [currentStepIndex, payload, user?.id]);
+
+  const currentStep = payload?.steps[currentStepIndex] || null;
+  const totalSteps = payload?.steps.length || 0;
+  const completionRate = payload?.assignment?.progress_percent || 0;
+
+  const readinessLabel = useMemo(() => {
+    if (!payload?.module) return "";
+    if (payload.module.criticality === "high") {
+      return "High criticality";
+    }
+    return "Standard criticality";
+  }, [payload?.module]);
+
+  async function persistProgress(
+    nextStepIndex: number,
+    completedSteps: number,
+    status?: ModuleAssignment["status"],
+  ) {
+    if (!user?.id || !payload?.assignment) {
       return;
     }
 
-    setIsListening(true);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    const recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = language === 'HIN' ? 'hi-IN' : 'en-IN';
+    setIsSaving(true);
+    try {
+      const response = (await apiClient.post(
+        `/api/training/assignments/${payload.assignment.assignment_id}/progress`,
+        {
+          user_id: user.id,
+          current_step: Math.max(nextStepIndex + 1, 1),
+          progress_percent: totalSteps
+            ? Math.round((completedSteps / totalSteps) * 100)
+            : 0,
+          status,
+        },
+      )) as ProgressResponse;
 
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
-      const transcript = event.results[0][0].transcript.toLowerCase();
-      setIsListening(false);
+      setPayload((current) =>
+        current ? { ...current, assignment: response.assignment } : current,
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  }
 
-      if (transcript.includes('next') || transcript.includes('aage')) {
-        if (currentStepIndex < module.steps.length - 1) {
-          advanceStep(currentStepIndex + 1);
-        }
-      } else if (transcript.includes('back') || transcript.includes('peeche') || transcript.includes('previous')) {
-        if (currentStepIndex > 0) {
-          advanceStep(currentStepIndex - 1);
-        }
-      } else if (transcript.includes('repeat') || transcript.includes('dobara') || transcript.includes('phir se')) {
-        handleSpeak();
-      } else if (transcript.includes('pause') || transcript.includes('ruk')) {
-        handleStopSpeak();
-      }
-    };
+  async function handleNext() {
+    if (!payload || currentStepIndex >= totalSteps - 1) return;
+    const nextIndex = currentStepIndex + 1;
+    const completedSteps = currentStepIndex + 1;
 
-    (recognition as unknown as { onerror: () => void }).onerror = () => setIsListening(false);
-    recognition.onend = () => setIsListening(false);
-    recognition.start();
-  };
-
-  // Check if this is the final step
-  const isLastStep = currentStepIndex === module.steps.length - 1;
-
-  const handleComplete = () => {
-    trackEvent('ui.training_module_completed', {
+    await persistProgress(nextIndex, completedSteps, "in_progress");
+    setCurrentStepIndex(nextIndex);
+    trackEvent("ui.training_step_advanced", {
       moduleId,
-      totalSteps: module.steps.length,
+      stepNumber: nextIndex + 1,
+      totalSteps,
     });
-    // Navigate to assessment
-    window.location.href = `/operator/training/${moduleId}/assessment`;
-  };
+  }
+
+  function handlePrevious() {
+    if (currentStepIndex <= 0) return;
+    setCurrentStepIndex((value) => value - 1);
+  }
+
+  async function handleCompleteModule() {
+    if (!payload) return;
+
+    await persistProgress(totalSteps - 1, totalSteps, "completed");
+    trackEvent("ui.training_module_completed", { moduleId, totalSteps });
+
+    if (payload.assessment?.assessment_id) {
+      router.push(`/operator/training/${moduleId}/assessment`);
+      return;
+    }
+    router.push("/operator/training");
+  }
+
+  function handleSpeak() {
+    if (
+      !currentStep ||
+      typeof window === "undefined" ||
+      !("speechSynthesis" in window)
+    ) {
+      return;
+    }
+
+    speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(
+      currentStep.voice_prompt || currentStep.instruction,
+    );
+    utterance.lang =
+      language === "HIN" || language === "HING" ? "hi-IN" : "en-IN";
+    utterance.rate = 0.92;
+    utterance.onstart = () => setIsSpeaking(true);
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+    speechSynthesis.speak(utterance);
+  }
+
+  function stopSpeak() {
+    speechSynthesis.cancel();
+    setIsSpeaking(false);
+  }
 
   return (
     <OperatorLayout>
-      <div className="max-w-6xl mx-auto px-4 py-8">
-        {/* Header with Progress */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <Link href="/operator/training" className="text-muted hover:text-primary">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                </svg>
-              </Link>
-              <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
-                {module.title}
-              </h1>
+      <div className="mx-auto max-w-[1520px] px-4 py-8">
+        {isLoading ? (
+          <Card>
+            <div className="py-12 text-center text-muted">
+              <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+              <p>Loading training module...</p>
             </div>
-            <Link href={`/operator/training/${moduleId}/assessment`}>
-              <Button variant="outline" size="sm">
-                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                Assessment
-              </Button>
-            </Link>
-          </div>
-          <StepProgress currentStep={currentStepIndex} totalSteps={module.steps.length} />
-        </div>
-
-        {/* Inactivity Warning */}
-        {inactivityWarning && (
-          <div className="mb-4 p-4 bg-warning-light border border-warning/30 rounded-lg flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <svg className="w-5 h-5 text-warning" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span className="text-sm text-foreground">Session inactive for 2 minutes. Would you like to continue?</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button variant="secondary" size="sm" onClick={() => setInactivityWarning(false)}>
-                Continue
-              </Button>
-              <Link href="/operator/training">
-                <Button variant="ghost" size="sm">Exit</Button>
-              </Link>
-            </div>
-          </div>
-        )}
-
-        {/* Content Grid */}
-        <div className="grid lg:grid-cols-3 gap-6">
-          {/* Key Learnings Summary */}
-          <Card
-            title="Key Learnings Summary"
-            icon={
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-              </svg>
-            }
-          >
-            <ul className="space-y-3">
-              {module.steps.map((step, idx) => (
-                <li key={step.id} className="flex items-start gap-2 text-sm">
-                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs flex-shrink-0 ${
-                    idx < currentStepIndex ? 'bg-accent text-white' :
-                    idx === currentStepIndex ? 'bg-primary text-white' :
-                    'bg-muted-light text-muted'
-                  }`}>
-                    {idx < currentStepIndex ? '✓' : idx + 1}
-                  </span>
-                  <span className={idx === currentStepIndex ? 'font-medium text-foreground' : 'text-muted'}>
-                    {step.title}
-                  </span>
-                </li>
-              ))}
-            </ul>
           </Card>
-
-          {/* Current Step Content */}
-          <div className="lg:col-span-2">
-            <Card className="!p-0">
-              {/* Step Header */}
-              <div className="p-4 border-b border-border bg-muted-light">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant="info">
-                        Step {currentStep.id} of {module.steps.length}
-                      </Badge>
-                      <h3 className="text-lg font-semibold text-foreground">{currentStep.title}</h3>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm text-muted">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        ) : error ? (
+          <Card>
+            <div className="py-6 text-center">
+              <p className="text-danger font-medium">{error}</p>
+              <p className="text-sm text-muted mt-2">
+                Open the module from the training page after logging in as an
+                operator.
+              </p>
+            </div>
+          </Card>
+        ) : !payload || !currentStep ? (
+          <Card>
+            <div className="py-6 text-center text-muted">
+              This module has no generated steps yet.
+            </div>
+          </Card>
+        ) : (
+          <>
+            <div className="hero-panel mb-6 p-5">
+              <div className="mb-4 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <Link
+                    href="/operator/training"
+                    className="text-muted hover:text-primary"
+                  >
+                    <svg
+                      className="w-5 h-5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M15 19l-7-7 7-7"
+                      />
                     </svg>
-                    <span>{currentStep.citation}</span>
-                    <span>|</span>
-                    <span>Page {currentStep.page}</span>
+                  </Link>
+                  <div>
+                    <h1 className="text-xl font-bold text-foreground">
+                      {payload.module.title}
+                    </h1>
+                    <p className="text-sm text-muted">
+                      {payload.module.document_code || "Document"}{" "}
+                      {payload.module.revision_label
+                        ? `| ${payload.module.revision_label}`
+                        : ""}
+                    </p>
                   </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge
+                    variant={
+                      payload.module.criticality === "high" ? "warning" : "info"
+                    }
+                  >
+                    {readinessLabel}
+                  </Badge>
+                  {payload.assessment ? (
+                    <Link href={`/operator/training/${moduleId}/assessment`}>
+                      <Button variant="outline" size="sm">
+                        Assessment
+                      </Button>
+                    </Link>
+                  ) : null}
                 </div>
               </div>
+              <StepProgress
+                currentStep={currentStepIndex}
+                totalSteps={totalSteps}
+              />
+            </div>
 
-              {/* Step Content */}
-              <div className="p-4">
-                <div className="bg-muted-light rounded-lg p-4 mb-4 min-h-[200px]">
-                  <pre className="whitespace-pre-wrap font-sans text-sm text-foreground leading-relaxed">
-                    {currentStep.content}
-                  </pre>
-                </div>
-
-                {/* Voice Listening Indicator */}
-                {isListening && (
-                  <div className="mb-4 p-3 bg-primary/10 border border-primary/30 rounded-lg flex items-center gap-3">
-                    <div className="relative">
-                      <div className="w-10 h-10 bg-primary rounded-full flex items-center justify-center">
-                        <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                        </svg>
-                      </div>
-                      <div className="absolute inset-0 bg-primary rounded-full animate-ping opacity-25" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-foreground">Listening for voice command...</p>
-                      <p className="text-xs text-muted">Say: &quot;next&quot;, &quot;back&quot;, &quot;repeat&quot;, or &quot;pause&quot;</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Controls */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    {/* Audio Guidance Toggle */}
-                    <div className="flex items-center gap-2 mr-2">
-                      <span className="text-xs text-muted">Auto-play</span>
+            <div className="grid lg:grid-cols-3 gap-6">
+              <Card title="Module Overview">
+                <div className="space-y-4">
+                  <p className="text-sm text-muted">
+                    {payload.module.description ||
+                      "Grounded learning steps derived from the approved document revision."}
+                  </p>
+                  <ProgressBar
+                    value={Number(completionRate)}
+                    showLabel
+                    label="Training progress"
+                    color={
+                      payload.assignment?.status === "completed"
+                        ? "bg-accent"
+                        : "bg-primary"
+                    }
+                  />
+                  <div className="space-y-3">
+                    {payload.steps.map((step, index) => (
                       <button
-                        onClick={() => setAutoPlayEnabled(!autoPlayEnabled)}
-                        className={`relative w-10 h-5 rounded-full transition-colors ${
-                          autoPlayEnabled ? 'bg-primary' : 'bg-muted-light'
+                        key={step.id}
+                        onClick={() => setCurrentStepIndex(index)}
+                        className={`w-full text-left rounded-lg border px-3 py-3 transition-colors ${
+                          index === currentStepIndex
+                            ? "border-primary bg-primary/5"
+                            : "border-border hover:border-primary/50 hover:bg-muted-light"
                         }`}
                       >
-                        <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${
-                          autoPlayEnabled ? 'translate-x-5' : ''
-                        }`} />
+                        <div className="flex items-start gap-3">
+                          <span
+                            className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold ${
+                              index < currentStepIndex
+                                ? "bg-accent text-white"
+                                : index === currentStepIndex
+                                  ? "bg-primary text-white"
+                                  : "bg-muted-light text-muted"
+                            }`}
+                          >
+                            {index < currentStepIndex ? "OK" : step.step_number}
+                          </span>
+                          <div>
+                            <p className="text-sm font-medium text-foreground">
+                              {step.title}
+                            </p>
+                            <p className="text-xs text-muted mt-1">
+                              {step.operator_check ||
+                                "Review this instruction carefully before continuing."}
+                            </p>
+                          </div>
+                        </div>
                       </button>
+                    ))}
+                  </div>
+                </div>
+              </Card>
+
+              <div className="lg:col-span-2">
+                <Card className="!p-0">
+                  <div className="p-4 border-b border-border bg-muted-light">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-2 mb-2">
+                          <Badge variant="info">
+                            Step {currentStep.step_number} of {totalSteps}
+                          </Badge>
+                          {payload.assignment ? (
+                            <Badge
+                              variant={
+                                payload.assignment.status === "completed"
+                                  ? "success"
+                                  : payload.assignment.status === "in_progress"
+                                    ? "warning"
+                                    : "default"
+                              }
+                            >
+                              {payload.assignment.status.replace("_", " ")}
+                            </Badge>
+                          ) : null}
+                        </div>
+                        <h2 className="text-lg font-semibold text-foreground">
+                          {currentStep.title}
+                        </h2>
+                        <p className="text-sm text-muted mt-1">
+                          {currentStep.citation_label ||
+                            "Grounded training step"}
+                          {currentStep.page_start
+                            ? ` | Page ${currentStep.page_start}`
+                            : ""}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant={isSpeaking ? "danger" : "secondary"}
+                          size="sm"
+                          onClick={isSpeaking ? stopSpeak : handleSpeak}
+                        >
+                          {isSpeaking ? "Stop Audio" : "Speak Step"}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-5 space-y-5">
+                    <div className="bg-muted-light rounded-lg p-4">
+                      <pre className="whitespace-pre-wrap font-sans text-sm text-foreground leading-relaxed">
+                        {currentStep.instruction}
+                      </pre>
                     </div>
 
-                    <Button
-                      variant={isPlaying ? 'danger' : 'secondary'}
-                      onClick={isPlaying ? handleStopSpeak : handleSpeak}
-                    >
-                      {isPlaying ? (
-                        <>
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
-                          </svg>
-                          Stop
-                        </>
-                      ) : (
-                        <>
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                          </svg>
-                          Speak Step
-                        </>
-                      )}
-                    </Button>
+                    <div className="grid md:grid-cols-2 gap-4">
+                      <div className="rounded-lg border border-border p-4">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">
+                          Operator Check
+                        </p>
+                        <p className="text-sm text-foreground">
+                          {currentStep.operator_check ||
+                            "Confirm this instruction has been understood before moving ahead."}
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-border p-4">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">
+                          Voice Prompt
+                        </p>
+                        <p className="text-sm text-foreground">
+                          {currentStep.voice_prompt ||
+                            currentStep.instruction.slice(0, 240)}
+                        </p>
+                      </div>
+                    </div>
 
-                    {/* Voice Command Button */}
-                    <Button
-                      variant={isListening ? 'danger' : 'ghost'}
-                      onClick={handleVoiceCommand}
-                      title="Voice commands"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                      </svg>
-                      {isListening ? 'Listening...' : 'Voice Command'}
-                    </Button>
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-2">
+                      <div className="text-xs text-muted">
+                        {isSaving
+                          ? "Saving progress..."
+                          : "Progress is stored against your live training assignment."}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="secondary"
+                          onClick={handlePrevious}
+                          disabled={currentStepIndex === 0 || isSaving}
+                        >
+                          Previous
+                        </Button>
+                        {currentStepIndex < totalSteps - 1 ? (
+                          <Button
+                            variant="primary"
+                            onClick={() => void handleNext()}
+                            disabled={isSaving}
+                          >
+                            Complete Step and Continue
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="success"
+                            onClick={() => void handleCompleteModule()}
+                            disabled={isSaving}
+                          >
+                            Complete Module
+                          </Button>
+                        )}
+                      </div>
+                    </div>
                   </div>
-
-                  <div className="flex items-center gap-3">
-                    <Button
-                      variant="secondary"
-                      onClick={() => advanceStep(Math.max(0, currentStepIndex - 1))}
-                      disabled={currentStepIndex === 0}
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                      </svg>
-                      Back
-                    </Button>
-                    
-                    {isLastStep ? (
-                      <Button variant="success" onClick={handleComplete}>
-                        Complete Module
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="primary"
-                        onClick={() => advanceStep(Math.min(module.steps.length - 1, currentStepIndex + 1))}
-                      >
-                        Next
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
-                      </Button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Voice Commands Help */}
-                <div className="mt-4 p-3 bg-muted-light/50 rounded-lg">
-                  <p className="text-xs text-muted">
-                    <span className="font-medium">Voice Commands:</span> &quot;next&quot; / &quot;back&quot; / &quot;repeat&quot; / &quot;pause&quot;
-                    {language !== 'ENG' && (
-                      <span> | Hindi: &quot;aage&quot; / &quot;peeche&quot; / &quot;dobara&quot; / &quot;ruk&quot;</span>
-                    )}
-                  </p>
-                </div>
+                </Card>
               </div>
-            </Card>
-          </div>
-        </div>
+            </div>
+          </>
+        )}
       </div>
     </OperatorLayout>
   );

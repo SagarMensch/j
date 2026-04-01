@@ -1,8 +1,7 @@
 import sys
 from pathlib import Path
-from sqlalchemy import text
 
-REPO_ROOT = Path(r"c:\Users\ratho\Sequelstring AI\ingrevia").resolve()
+REPO_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(REPO_ROOT / "backend"))
 
 from app.core.config import get_settings

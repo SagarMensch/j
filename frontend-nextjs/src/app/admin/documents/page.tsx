@@ -169,18 +169,22 @@ export default function DocumentsPage() {
   return (
     <AdminLayout>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">
-              Document Management
-            </h1>
-            <p className="text-muted text-sm mt-1">
-              Manage SOPs, manuals, and training documents
-            </p>
+        <div className="hero-panel p-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="tfl-kicker">Document Control</p>
+              <h1 className="mt-2 text-3xl font-bold tracking-[-0.03em] text-foreground">
+                Document management
+              </h1>
+              <p className="mt-2 text-sm text-muted">
+                Manage SOPs, manuals, and training documents with type-coded
+                release visibility.
+              </p>
+            </div>
+            <Button variant="danger" onClick={handlePurge} disabled={isPurging}>
+              {isPurging ? "Purging..." : "Purge Documents"}
+            </Button>
           </div>
-          <Button variant="danger" onClick={handlePurge} disabled={isPurging}>
-            {isPurging ? "Purging..." : "Purge Documents"}
-          </Button>
         </div>
 
         <Card className="!p-4">
@@ -285,7 +289,7 @@ export default function DocumentsPage() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="tfl-table">
               <thead>
                 <tr className="bg-muted-light">
                   <th className="text-left px-4 py-3 text-sm font-semibold text-foreground">

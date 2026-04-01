@@ -17,7 +17,9 @@ from sqlalchemy import text
 from app.core.config import get_settings
 from app.db.neo4j import check_neo4j_connection, get_driver
 from app.db.postgres import check_postgres_connection, engine
+from app.services.db_compat import ensure_database_compatibility
 from app.services.sop_retrieval import get_sop_retriever
+from app.services.training_builder import generate_learning_assets, persist_learning_assets
 
 
 settings = get_settings()
@@ -54,16 +56,24 @@ class Citation(BaseModel):
     chunk_id: str
     document_code: str | None = None
     document_title: str | None = None
+    revision_id: str | None = None
     revision_label: str | None = None
     page_start: int | None = None
+    page_end: int | None = None
     citation_label: str | None = None
     section_title: str | None = None
     content: str | None = None
+    block_ids: list[str] = []
+    bbox_x0: float | None = None
+    bbox_y0: float | None = None
+    bbox_x1: float | None = None
+    bbox_y1: float | None = None
 
 
 class ChatResponse(BaseModel):
     user_text: str
     assistant_text: str
+    assistant_tts_text: str | None = None
     audio_base64: str
     citations: list[Citation] = []
 
@@ -116,6 +126,15 @@ class AssessmentSubmitRequest(BaseModel):
     responses: dict[str, str] = Field(default_factory=dict)
 
 
+class AdminSettingsUpdateRequest(BaseModel):
+    user_id: str
+    settings: dict[str, Any]
+
+
+class NotificationReadRequest(BaseModel):
+    user_id: str
+
+
 app = FastAPI(title="Jubilant Ingrevia Platform API", version="2.0")
 
 app.add_middleware(
@@ -135,6 +154,11 @@ if FRONTEND_DIR.exists():
     app.mount("/ui", StaticFiles(directory=FRONTEND_DIR, html=True), name="ui")
 
 
+@app.on_event("startup")
+async def startup_event():
+    ensure_database_compatibility()
+
+
 def _iso(value: Any) -> str | None:
     if value is None:
         return None
@@ -148,6 +172,208 @@ def _iso(value: Any) -> str | None:
 def _det_uuid(*parts: object) -> str:
     source = "|".join(str(part) for part in parts)
     return str(uuid.uuid5(CERT_NAMESPACE, source))
+
+
+def _prepare_document_identity(conn, *, code: str) -> dict[str, Any]:
+    existing = conn.execute(
+        text(
+            """
+            SELECT id::text AS id, title, document_type, department_name
+            FROM documents
+            WHERE code = :code
+            """
+        ),
+        {"code": code},
+    ).mappings().first()
+    if existing:
+        next_version = int(
+            conn.execute(
+                text(
+                    """
+                    SELECT COALESCE(MAX(version_number), 0) + 1
+                    FROM document_revisions
+                    WHERE document_id = CAST(:document_id AS uuid)
+                    """
+                ),
+                {"document_id": existing["id"]},
+            ).scalar_one()
+        )
+        return {
+            "document_id": existing["id"],
+            "exists": True,
+            "version_number": next_version,
+            "revision_label": f"R{next_version}",
+        }
+    return {
+        "document_id": str(uuid.uuid4()),
+        "exists": False,
+        "version_number": 1,
+        "revision_label": "R1",
+    }
+
+
+def _persist_document_revision(
+    conn,
+    *,
+    document_id: str,
+    revision_id: str,
+    code: str,
+    title: str,
+    document_type: str,
+    department: str,
+    source_filename: str,
+    file_path: str,
+    page_count: int,
+    classification: str,
+    version_number: int,
+    revision_label: str,
+):
+    conn.execute(
+        text(
+            """
+            UPDATE document_revisions
+            SET
+                is_latest_approved = false,
+                effective_to = COALESCE(effective_to, NOW()),
+                updated_at = NOW()
+            WHERE document_id = CAST(:document_id AS uuid)
+              AND is_latest_approved = true
+            """
+        ),
+        {"document_id": document_id},
+    )
+
+    existing_document = conn.execute(
+        text("SELECT 1 FROM documents WHERE id = CAST(:document_id AS uuid)"),
+        {"document_id": document_id},
+    ).scalar()
+
+    if existing_document:
+        conn.execute(
+            text(
+                """
+                UPDATE documents
+                SET
+                    code = :code,
+                    title = :title,
+                    document_type = :document_type,
+                    department_name = :department_name,
+                    source_filename = :source_filename,
+                    is_active = true,
+                    updated_at = NOW()
+                WHERE id = CAST(:document_id AS uuid)
+                """
+            ),
+            {
+                "document_id": document_id,
+                "code": code,
+                "title": title,
+                "document_type": document_type,
+                "department_name": department,
+                "source_filename": source_filename,
+            },
+        )
+    else:
+        conn.execute(
+            text(
+                """
+                INSERT INTO documents (
+                    id, code, title, document_type, department_name, source_filename,
+                    is_active, created_at, updated_at
+                )
+                VALUES (
+                    CAST(:id AS uuid), :code, :title, :document_type, :department_name,
+                    :source_filename, true, NOW(), NOW()
+                )
+                """
+            ),
+            {
+                "id": document_id,
+                "code": code,
+                "title": title,
+                "document_type": document_type,
+                "department_name": department,
+                "source_filename": source_filename,
+            },
+        )
+
+    conn.execute(
+        text(
+            """
+            INSERT INTO document_revisions (
+                id, document_id, revision_label, version_number,
+                effective_from, approval_status, is_latest_approved,
+                file_path, page_count, extraction_classification, extraction_status,
+                created_at, updated_at
+            )
+            VALUES (
+                CAST(:id AS uuid), CAST(:document_id AS uuid), :revision_label, :version_number,
+                NOW(), 'approved', true, :file_path, :page_count, :classification, 'completed',
+                NOW(), NOW()
+            )
+            """
+        ),
+        {
+            "id": revision_id,
+            "document_id": document_id,
+            "revision_label": revision_label,
+            "version_number": version_number,
+            "file_path": file_path,
+            "page_count": page_count,
+            "classification": classification,
+        },
+    )
+
+
+def _load_page_blocks(conn, page_id: str) -> list[dict[str, Any]]:
+    return [
+        dict(row)
+        for row in conn.execute(
+            text(
+                """
+                SELECT
+                    eb.id::text AS block_id,
+                    eb.block_type,
+                    eb.section_title,
+                    eb.text,
+                    eb.bbox_left,
+                    eb.bbox_top,
+                    eb.bbox_right,
+                    eb.bbox_bottom,
+                    eb.confidence,
+                    eb.reading_order
+                FROM extracted_blocks eb
+                WHERE eb.page_id = CAST(:page_id AS uuid)
+                ORDER BY eb.reading_order ASC, eb.id
+                """
+            ),
+            {"page_id": page_id},
+        ).mappings()
+    ]
+
+
+def _get_app_settings(conn) -> dict[str, Any]:
+    defaults = {
+        "organization_name": "Jubilant Ingrevia",
+        "primary_email": "admin@jubilantingrevia.com",
+        "default_language": "en",
+        "assessment_passing_score": 70,
+        "certification_validity_days": 365,
+        "reminder_frequency": "weekly",
+        "notifications": {
+            "emailAlerts": True,
+            "trainingReminders": True,
+            "certExpiry": True,
+            "systemUpdates": False,
+        },
+    }
+    rows = conn.execute(
+        text("SELECT setting_key, setting_value FROM app_settings")
+    ).mappings()
+    settings_payload = dict(defaults)
+    for row in rows:
+        settings_payload[row["setting_key"]] = row["setting_value"]
+    return settings_payload
 
 
 def _get_user(conn, user_id: str) -> dict[str, Any]:
@@ -172,6 +398,188 @@ def _get_user(conn, user_id: str) -> dict[str, Any]:
     if not row:
         raise HTTPException(status_code=404, detail="User not found")
     return dict(row)
+
+
+def _queue_notification(
+    conn,
+    *,
+    user_id: str,
+    event_type: str,
+    severity: str,
+    title: str,
+    message: str,
+    cta_url: str | None = None,
+    event_key: str | None = None,
+) -> None:
+    inserted_id = conn.execute(
+        text(
+            """
+            INSERT INTO notifications (
+                user_id,
+                event_type,
+                severity,
+                title,
+                message,
+                cta_url,
+                channel,
+                event_key,
+                status
+            )
+            VALUES (
+                CAST(:user_id AS uuid),
+                :event_type,
+                :severity,
+                :title,
+                :message,
+                :cta_url,
+                'in_app',
+                :event_key,
+                'unread'
+            )
+            ON CONFLICT(event_key) DO NOTHING
+            RETURNING id::text
+            """
+        ),
+        {
+            "user_id": user_id,
+            "event_type": event_type,
+            "severity": severity,
+            "title": title,
+            "message": message,
+            "cta_url": cta_url,
+            "event_key": event_key,
+        },
+    ).scalar()
+
+    if inserted_id:
+        conn.execute(
+            text(
+                """
+                INSERT INTO notification_delivery_logs (
+                    notification_id,
+                    channel,
+                    delivery_status
+                )
+                VALUES (
+                    CAST(:notification_id AS uuid),
+                    'in_app',
+                    'delivered'
+                )
+                """
+            ),
+            {"notification_id": inserted_id},
+        )
+
+
+def _materialize_user_notifications(conn, user_id: str) -> None:
+    now = datetime.now(timezone.utc)
+
+    assignment_rows = conn.execute(
+        text(
+            """
+            SELECT
+                ta.id::text AS assignment_id,
+                tm.title AS module_title,
+                ta.due_at
+            FROM training_assignments ta
+            JOIN training_modules tm ON tm.id = ta.module_id
+            WHERE ta.user_id = CAST(:user_id AS uuid)
+              AND ta.is_mandatory = true
+              AND ta.status IN ('assigned', 'in_progress')
+              AND ta.due_at IS NOT NULL
+              AND ta.due_at <= now() + interval '3 day'
+            ORDER BY ta.due_at ASC
+            """
+        ),
+        {"user_id": user_id},
+    ).mappings()
+
+    for row in assignment_rows:
+        due_at = row["due_at"]
+        if due_at is None:
+            continue
+        if due_at.tzinfo is None:
+            due_at = due_at.replace(tzinfo=timezone.utc)
+
+        assignment_id = row["assignment_id"]
+        module_title = row["module_title"]
+        if due_at <= now:
+            _queue_notification(
+                conn,
+                user_id=user_id,
+                event_type="assignment_overdue",
+                severity="high",
+                title="Training overdue",
+                message=f"{module_title} is overdue. Complete it now.",
+                cta_url="/operator/training",
+                event_key=f"assignment_overdue:{assignment_id}",
+            )
+            continue
+
+        days_left = max(0, int((due_at - now).total_seconds() // 86400))
+        due_bucket = 1 if days_left <= 1 else 3
+        _queue_notification(
+            conn,
+            user_id=user_id,
+            event_type="assignment_due",
+            severity="medium",
+            title="Training due soon",
+            message=f"{module_title} is due in {due_bucket} day(s).",
+            cta_url="/operator/training",
+            event_key=f"assignment_due:{assignment_id}:{due_bucket}",
+        )
+
+    cert_rows = conn.execute(
+        text(
+            """
+            SELECT
+                c.id::text AS certification_id,
+                tm.title AS module_title,
+                c.status,
+                c.expires_at
+            FROM certifications c
+            JOIN training_modules tm ON tm.id = c.module_id
+            WHERE c.user_id = CAST(:user_id AS uuid)
+              AND c.expires_at IS NOT NULL
+              AND c.expires_at <= now() + interval '30 day'
+            ORDER BY c.expires_at ASC
+            """
+        ),
+        {"user_id": user_id},
+    ).mappings()
+
+    for row in cert_rows:
+        certification_id = row["certification_id"]
+        module_title = row["module_title"]
+        expires_at = row["expires_at"]
+        status = (row["status"] or "").lower()
+        if expires_at and expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+        if status == "expired" or (expires_at and expires_at <= now):
+            _queue_notification(
+                conn,
+                user_id=user_id,
+                event_type="certification_expired",
+                severity="high",
+                title="Certification expired",
+                message=f"{module_title} certificate has expired.",
+                cta_url="/operator/assessments",
+                event_key=f"cert_expired:{certification_id}",
+            )
+            continue
+
+        days_left = max(0, int((expires_at - now).total_seconds() // 86400))
+        _queue_notification(
+            conn,
+            user_id=user_id,
+            event_type="certification_expiring",
+            severity="medium",
+            title="Certificate expiring",
+            message=f"{module_title} certificate expires in {days_left} day(s).",
+            cta_url="/operator/reports",
+            event_key=f"cert_expiring:{certification_id}",
+        )
 
 
 def _require_admin_or_supervisor(user: dict[str, Any]):
@@ -348,9 +756,16 @@ async def list_users():
                     u.email,
                     u.role,
                     u.preferred_language,
-                    d.name AS department
+                    d.name AS department,
+                    count(DISTINCT c.id) FILTER (WHERE c.status = 'active') AS active_certifications,
+                    count(DISTINCT ta.id) FILTER (WHERE ta.is_mandatory) AS mandatory_assignments,
+                    count(DISTINCT ta.id) FILTER (WHERE ta.is_mandatory AND ta.status = 'completed') AS completed_assignments,
+                    max(c.expires_at) AS latest_cert_expiry
                 FROM users u
                 LEFT JOIN departments d ON d.id = u.department_id
+                LEFT JOIN training_assignments ta ON ta.user_id = u.id
+                LEFT JOIN certifications c ON c.user_id = u.id
+                GROUP BY u.id, u.employee_code, u.full_name, u.email, u.role, u.preferred_language, d.name
                 ORDER BY
                     CASE u.role WHEN 'operator' THEN 1 WHEN 'supervisor' THEN 2 WHEN 'admin' THEN 3 ELSE 4 END,
                     u.full_name
@@ -358,6 +773,11 @@ async def list_users():
             )
         ).mappings()
         users = [dict(row) for row in rows]
+    for user in users:
+        total = int(user.get("mandatory_assignments") or 0)
+        completed = int(user.get("completed_assignments") or 0)
+        user["mandatory_completion_rate"] = round((completed / total) * 100, 2) if total else 0.0
+        user["latest_cert_expiry"] = _iso(user.get("latest_cert_expiry"))
     return {"users": users}
 
 
@@ -603,7 +1023,29 @@ async def training_module_details(module_id: str, user_id: str):
             ).mappings()
         ]
 
-    return {"module": dict(module), "steps": steps, "assignment": dict(assignment) if assignment else None}
+        assessment = conn.execute(
+            text(
+                """
+                SELECT
+                    a.id::text AS assessment_id,
+                    a.title AS assessment_title,
+                    a.passing_score,
+                    a.time_limit_seconds,
+                    a.certification_label
+                FROM assessments a
+                WHERE a.module_id = CAST(:module_id AS uuid)
+                LIMIT 1
+                """
+            ),
+            {"module_id": module_id},
+        ).mappings().first()
+
+    return {
+        "module": dict(module),
+        "steps": steps,
+        "assignment": dict(assignment) if assignment else None,
+        "assessment": dict(assessment) if assessment else None,
+    }
 
 
 @app.post("/api/training/assignments/{assignment_id}/progress")
@@ -819,7 +1261,9 @@ async def list_documents():
                     d.id::text AS id,
                     d.code,
                     d.title,
-                    d.document_type AS department,
+                    d.document_type,
+                    d.department_name AS department,
+                    dr.id::text AS revision_id,
                     dr.revision_label AS revision,
                     dr.page_count AS pages,
                     dr.updated_at AS lastUpdated,
@@ -841,7 +1285,7 @@ async def list_documents():
 @app.get("/api/documents/{revision_id}/page/{page_number}")
 async def document_page_view(revision_id: str, page_number: int):
     with engine.connect() as conn:
-        page = conn.execute(
+        page_row = conn.execute(
             text(
                 """
                 SELECT
@@ -862,28 +1306,19 @@ async def document_page_view(revision_id: str, page_number: int):
             {"revision_id": revision_id, "page_number": page_number},
         ).mappings().first()
 
-        if not page:
+        if not page_row:
             chunk = conn.execute(
-                text("""
+                text(
+                    """
                     SELECT content, page_start, citation_label
                     FROM document_chunks
                     WHERE revision_id = CAST(:revision_id AS uuid)
-                    AND page_start = :page_number
+                      AND :page_number BETWEEN COALESCE(page_start, :page_number) AND COALESCE(page_end, :page_number)
                     LIMIT 1
-                """),
-                {"revision_id": revision_id, "page_number": page_number}
+                    """
+                ),
+                {"revision_id": revision_id, "page_number": page_number},
             ).mappings().first()
-
-            if not chunk:
-                chunk = conn.execute(
-                    text("""
-                        SELECT content, page_start, citation_label
-                        FROM document_chunks
-                        WHERE id = CAST(:revision_id AS uuid)
-                        LIMIT 1
-                    """),
-                    {"revision_id": revision_id}
-                ).mappings().first()
 
             if chunk:
                 return {
@@ -909,24 +1344,30 @@ async def document_page_view(revision_id: str, page_number: int):
                 }
             raise HTTPException(status_code=404, detail="Page not found for revision")
 
-        page = dict(page)
+        page = dict(page_row)
         if page.get("image_path"):
             page["image_url"] = f"/api/documents/{revision_id}/page/{page_number}/image"
+
+        blocks = _load_page_blocks(conn, page["page_id"])
+    return {"page": page, "blocks": blocks}
 
 
 @app.get("/api/chunks/{chunk_id}/content")
 async def chunk_content_view(chunk_id: str):
     with engine.connect() as conn:
         chunk = conn.execute(
-            text("""
+            text(
+                """
                 SELECT dc.id::text, dc.content, dc.page_start, dc.section_title,
                        dc.citation_label, dc.bbox_x0, dc.bbox_y0, dc.bbox_x1, dc.bbox_y1,
+                       dc.revision_id::text AS revision_id,
                        d.code as document_code, d.title as document_title
                 FROM document_chunks dc
                 JOIN document_revisions dr ON dc.revision_id = dr.id
                 JOIN documents d ON dr.document_id = d.id
                 WHERE dc.id = CAST(:chunk_id AS uuid)
-            """),
+                """
+            ),
             {"chunk_id": chunk_id}
         ).mappings().first()
 
@@ -936,7 +1377,7 @@ async def chunk_content_view(chunk_id: str):
         return {
             "page": {
                 "page_id": f"chunk-{chunk['id']}",
-                "revision_id": "",
+                "revision_id": chunk["revision_id"],
                 "page_number": chunk["page_start"],
                 "classification": "from_chunk",
                 "raw_text": chunk["content"],
@@ -961,35 +1402,6 @@ async def chunk_content_view(chunk_id: str):
             "bbox_x1": chunk.get("bbox_x1"),
             "bbox_y1": chunk.get("bbox_y1"),
         }
-        if page.get("image_path"):
-            page["image_url"] = f"/api/documents/{revision_id}/page/{page_number}/image"
-
-        blocks = [
-            dict(row)
-            for row in conn.execute(
-                text(
-                    """
-                    SELECT
-                        eb.id::text AS block_id,
-                        eb.block_type,
-                        eb.section_title,
-                        eb.text,
-                        eb.bbox_left,
-                        eb.bbox_top,
-                        eb.bbox_right,
-                        eb.bbox_bottom,
-                        eb.confidence,
-                        eb.reading_order
-                    FROM extracted_blocks eb
-                    WHERE eb.page_id = CAST(:page_id AS uuid)
-                    ORDER BY eb.reading_order ASC, eb.id
-                    """
-                ),
-                {"page_id": page["page_id"]},
-            ).mappings()
-        ]
-
-    return {"page": page, "blocks": blocks}
 
 
 @app.get("/api/documents/{revision_id}/page/{page_number}/image")
@@ -1101,6 +1513,7 @@ async def submit_assessment(assessment_id: str, req: AssessmentSubmitRequest):
     now = datetime.now(timezone.utc)
     with engine.begin() as conn:
         user = _get_user(conn, req.user_id)
+        app_settings = _get_app_settings(conn)
         assessment = conn.execute(
             text(
                 """
@@ -1244,7 +1657,7 @@ async def submit_assessment(assessment_id: str, req: AssessmentSubmitRequest):
                     "user_id": req.user_id,
                     "module_id": assessment["module_id"],
                     "issued_at": now,
-                    "expires_at": now + timedelta(days=365),
+                    "expires_at": now + timedelta(days=int(app_settings.get("certification_validity_days", 365))),
                     "last_attempt_id": attempt_id,
                 },
             )
@@ -1260,6 +1673,264 @@ async def submit_assessment(assessment_id: str, req: AssessmentSubmitRequest):
         "passed": passed,
         "passing_score": float(assessment["passing_score"]),
         "certification_status": certification_status,
+    }
+
+
+@app.get("/api/assessments")
+async def list_assessments(user_id: str):
+    with engine.connect() as conn:
+        _get_user(conn, user_id)
+        rows = conn.execute(
+            text(
+                """
+                SELECT
+                    a.id::text AS assessment_id,
+                    a.title,
+                    a.passing_score,
+                    a.time_limit_seconds,
+                    a.certification_label,
+                    tm.id::text AS module_id,
+                    tm.title AS module_title,
+                    ta.status AS assignment_status,
+                    ta.progress_percent,
+                    latest.score AS latest_score,
+                    latest.completed_at AS latest_completed_at,
+                    count(q.id) AS question_count
+                FROM assessments a
+                JOIN training_modules tm ON tm.id = a.module_id
+                JOIN training_assignments ta
+                  ON ta.module_id = tm.id
+                 AND ta.user_id = CAST(:user_id AS uuid)
+                LEFT JOIN assessment_questions q ON q.assessment_id = a.id
+                LEFT JOIN LATERAL (
+                    SELECT aa.score, aa.completed_at
+                    FROM assessment_attempts aa
+                    WHERE aa.user_id = CAST(:user_id AS uuid)
+                      AND aa.assessment_id = a.id
+                    ORDER BY aa.attempt_number DESC, aa.completed_at DESC NULLS LAST
+                    LIMIT 1
+                ) latest ON true
+                GROUP BY
+                    a.id, a.title, a.passing_score, a.time_limit_seconds, a.certification_label,
+                    tm.id, tm.title, ta.status, ta.progress_percent, latest.score, latest.completed_at
+                ORDER BY tm.title
+                """
+            ),
+            {"user_id": user_id},
+        ).mappings()
+        assessments = [dict(row) for row in rows]
+
+    for assessment in assessments:
+        assessment["latest_completed_at"] = _iso(assessment.get("latest_completed_at"))
+        score = assessment.get("latest_score")
+        if score is None:
+            assessment["status"] = "available"
+        elif float(score) >= float(assessment["passing_score"]):
+            assessment["status"] = "passed"
+        else:
+            assessment["status"] = "failed"
+    return {"assessments": assessments}
+
+
+@app.get("/api/notifications")
+async def list_notifications(user_id: str, status: str | None = None, limit: int = 20):
+    status_filter = (status or "").strip().lower()
+    if status_filter and status_filter not in {"read", "unread"}:
+        raise HTTPException(status_code=400, detail="Invalid status filter")
+
+    safe_limit = max(1, min(int(limit or 20), 100))
+
+    with engine.begin() as conn:
+        _get_user(conn, user_id)
+        _materialize_user_notifications(conn, user_id)
+
+        params: dict[str, Any] = {"user_id": user_id, "limit": safe_limit}
+        status_clause = ""
+        if status_filter:
+            status_clause = "AND n.status = :status"
+            params["status"] = status_filter
+
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                text(
+                    f"""
+                    SELECT
+                        n.id::text AS id,
+                        n.event_type,
+                        n.severity,
+                        n.title,
+                        n.message,
+                        n.cta_url,
+                        n.channel,
+                        n.status,
+                        n.created_at,
+                        n.read_at
+                    FROM notifications n
+                    WHERE n.user_id = CAST(:user_id AS uuid)
+                    {status_clause}
+                    ORDER BY n.created_at DESC
+                    LIMIT :limit
+                    """
+                ),
+                params,
+            ).mappings()
+        ]
+
+        unread_count = int(
+            conn.execute(
+                text(
+                    """
+                    SELECT count(*)
+                    FROM notifications
+                    WHERE user_id = CAST(:user_id AS uuid)
+                      AND status = 'unread'
+                    """
+                ),
+                {"user_id": user_id},
+            ).scalar_one()
+            or 0
+        )
+
+    notifications = [
+        {
+            "id": row["id"],
+            "event_type": row["event_type"],
+            "severity": row["severity"],
+            "title": row["title"],
+            "message": row["message"],
+            "cta_url": row["cta_url"],
+            "channel": row["channel"],
+            "status": row["status"],
+            "is_read": row["status"] == "read",
+            "created_at": _iso(row["created_at"]),
+            "read_at": _iso(row["read_at"]),
+        }
+        for row in rows
+    ]
+
+    return {"notifications": notifications, "unread_count": unread_count}
+
+
+@app.post("/api/notifications/read-all")
+async def mark_all_notifications_read(req: NotificationReadRequest):
+    with engine.begin() as conn:
+        _get_user(conn, req.user_id)
+        updated_count = conn.execute(
+            text(
+                """
+                UPDATE notifications
+                SET status = 'read', read_at = now()
+                WHERE user_id = CAST(:user_id AS uuid)
+                  AND status = 'unread'
+                """
+            ),
+            {"user_id": req.user_id},
+        ).rowcount
+    return {"updated_count": int(updated_count or 0)}
+
+
+@app.post("/api/notifications/{notification_id}/read")
+async def mark_notification_read(notification_id: str, req: NotificationReadRequest):
+    with engine.begin() as conn:
+        _get_user(conn, req.user_id)
+        updated_count = conn.execute(
+            text(
+                """
+                UPDATE notifications
+                SET status = 'read', read_at = now()
+                WHERE id = CAST(:notification_id AS uuid)
+                  AND user_id = CAST(:user_id AS uuid)
+                  AND status = 'unread'
+                """
+            ),
+            {"notification_id": notification_id, "user_id": req.user_id},
+        ).rowcount
+    return {"updated": bool(updated_count)}
+
+
+@app.get("/api/users/{user_id}/reports")
+async def user_reports(user_id: str):
+    with engine.connect() as conn:
+        user = _get_user(conn, user_id)
+
+        certifications = [
+            dict(row)
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT
+                        c.id::text AS certification_id,
+                        tm.title AS module_title,
+                        c.status,
+                        c.issued_at,
+                        c.expires_at,
+                        aa.score AS latest_score
+                    FROM certifications c
+                    JOIN training_modules tm ON tm.id = c.module_id
+                    LEFT JOIN assessment_attempts aa ON aa.id = c.last_attempt_id
+                    WHERE c.user_id = CAST(:user_id AS uuid)
+                    ORDER BY c.expires_at NULLS LAST, tm.title
+                    """
+                ),
+                {"user_id": user_id},
+            ).mappings()
+        ]
+
+        assessment_attempts = [
+            dict(row)
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT
+                        aa.id::text AS attempt_id,
+                        aa.attempt_number,
+                        aa.score,
+                        aa.status,
+                        aa.started_at,
+                        aa.completed_at,
+                        a.title AS assessment_title,
+                        tm.title AS module_title
+                    FROM assessment_attempts aa
+                    JOIN assessments a ON a.id = aa.assessment_id
+                    JOIN training_modules tm ON tm.id = a.module_id
+                    WHERE aa.user_id = CAST(:user_id AS uuid)
+                    ORDER BY aa.completed_at DESC NULLS LAST, aa.started_at DESC NULLS LAST
+                    """
+                ),
+                {"user_id": user_id},
+            ).mappings()
+        ]
+
+    for cert in certifications:
+        cert["issued_at"] = _iso(cert.get("issued_at"))
+        cert["expires_at"] = _iso(cert.get("expires_at"))
+    for attempt in assessment_attempts:
+        attempt["started_at"] = _iso(attempt.get("started_at"))
+        attempt["completed_at"] = _iso(attempt.get("completed_at"))
+
+    active_certs = sum(1 for cert in certifications if cert.get("status") == "active")
+    average_score = round(
+        sum(float(attempt["score"]) for attempt in assessment_attempts if attempt.get("score") is not None)
+        / max(1, sum(1 for attempt in assessment_attempts if attempt.get("score") is not None)),
+        2,
+    ) if assessment_attempts else 0.0
+
+    return {
+        "user": user,
+        "stats": {
+            "active_certifications": active_certs,
+            "assessment_attempts": len(assessment_attempts),
+            "average_score": average_score,
+            "expiring_soon": sum(
+                1
+                for cert in certifications
+                if cert.get("expires_at")
+                and datetime.fromisoformat(cert["expires_at"].replace("Z", "+00:00")) <= datetime.now(timezone.utc) + timedelta(days=30)
+            ),
+        },
+        "certifications": certifications,
+        "assessment_attempts": assessment_attempts,
     }
 
 
@@ -1344,9 +2015,9 @@ async def admin_readiness_overview(user_id: str):
                         u.full_name,
                         u.role,
                         COALESCE(d.name, 'unassigned') AS department,
-                        count(*) FILTER (WHERE ta.is_mandatory) AS mandatory_total,
-                        count(*) FILTER (WHERE ta.is_mandatory AND ta.status = 'completed') AS mandatory_completed,
-                        count(*) FILTER (WHERE c.status = 'active') AS active_certifications,
+                        count(DISTINCT ta.id) FILTER (WHERE ta.is_mandatory) AS mandatory_total,
+                        count(DISTINCT ta.id) FILTER (WHERE ta.is_mandatory AND ta.status = 'completed') AS mandatory_completed,
+                        count(DISTINCT c.id) FILTER (WHERE c.status = 'active') AS active_certifications,
                         max(c.expires_at) AS latest_cert_expiry
                     FROM users u
                     LEFT JOIN departments d ON d.id = u.department_id
@@ -1396,6 +2067,129 @@ async def admin_readiness_overview(user_id: str):
     }
 
 
+@app.get("/api/admin/reporting/overview")
+async def admin_reporting_overview(user_id: str):
+    with engine.connect() as conn:
+        user = _get_user(conn, user_id)
+        _require_admin_or_supervisor(user)
+
+        active_today = int(
+            conn.execute(
+                text(
+                    """
+                    SELECT count(DISTINCT user_id)
+                    FROM retrieval_events
+                    WHERE created_at >= date_trunc('day', now())
+                      AND user_id IS NOT NULL
+                    """
+                )
+            ).scalar_one()
+            or 0
+        )
+        active_week = int(
+            conn.execute(
+                text(
+                    """
+                    SELECT count(DISTINCT user_id)
+                    FROM retrieval_events
+                    WHERE created_at >= now() - interval '7 day'
+                      AND user_id IS NOT NULL
+                    """
+                )
+            ).scalar_one()
+            or 0
+        )
+        queries_today = int(
+            conn.execute(
+                text(
+                    """
+                    SELECT count(*)
+                    FROM retrieval_events
+                    WHERE created_at >= date_trunc('day', now())
+                    """
+                )
+            ).scalar_one()
+            or 0
+        )
+        avg_latency_ms = float(
+            conn.execute(
+                text("SELECT COALESCE(avg(latency_ms), 0) FROM retrieval_events")
+            ).scalar_one()
+            or 0.0
+        )
+
+        top_queries = [
+            dict(row)
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT query_text AS query, count(*) AS count
+                    FROM retrieval_events
+                    GROUP BY query_text
+                    ORDER BY count DESC, query_text
+                    LIMIT 8
+                    """
+                )
+            ).mappings()
+        ]
+
+        department_usage = [
+            dict(row)
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT
+                        COALESCE(d.name, 'unassigned') AS name,
+                        count(re.id) AS usage
+                    FROM retrieval_events re
+                    LEFT JOIN users u ON u.id = re.user_id
+                    LEFT JOIN departments d ON d.id = u.department_id
+                    GROUP BY COALESCE(d.name, 'unassigned')
+                    ORDER BY usage DESC, name
+                    """
+                )
+            ).mappings()
+        ]
+
+        query_trend = [
+            dict(row)
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT
+                        to_char(date_trunc('day', created_at), 'Mon DD') AS month,
+                        count(*) AS value
+                    FROM retrieval_events
+                    WHERE created_at >= now() - interval '7 day'
+                    GROUP BY date_trunc('day', created_at)
+                    ORDER BY date_trunc('day', created_at)
+                    """
+                )
+            ).mappings()
+        ]
+
+    max_usage = max([int(item["usage"]) for item in department_usage], default=0) or 1
+    return {
+        "requestor": user,
+        "platform_usage": {
+            "daily_active": active_today,
+            "weekly_active": active_week,
+            "queries_today": queries_today,
+            "avg_latency_ms": round(avg_latency_ms, 2),
+        },
+        "department_usage": [
+            {
+                "name": item["name"],
+                "usage": int(item["usage"]),
+                "percentage": round((int(item["usage"]) / max_usage) * 100, 2),
+            }
+            for item in department_usage
+        ],
+        "top_queries": top_queries,
+        "query_trend": query_trend,
+    }
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     _require_secret(settings.GROQ_API_KEY, "GROQ_API_KEY")
@@ -1433,11 +2227,18 @@ async def chat(req: ChatRequest):
             chunk_id=chunk.get("chunk_id", ""),
             document_code=chunk.get("document_code"),
             document_title=chunk.get("document_title"),
+            revision_id=chunk.get("revision_id"),
             revision_label=chunk.get("revision_label"),
             page_start=chunk.get("page_start"),
+            page_end=chunk.get("page_end"),
             citation_label=chunk.get("citation_label"),
             section_title=chunk.get("section_title"),
-            content=chunk.get("content")
+            content=chunk.get("content"),
+            block_ids=chunk.get("block_ids") or [],
+            bbox_x0=chunk.get("bbox_x0"),
+            bbox_y0=chunk.get("bbox_y0"),
+            bbox_x1=chunk.get("bbox_x1"),
+            bbox_y1=chunk.get("bbox_y1"),
         ))
 
     context = "\n\n".join(context_parts)
@@ -1489,6 +2290,7 @@ Context from documents:
             assistant_text = llm_resp.json()["choices"][0]["message"]["content"]
 
     audio_base64 = ""
+    assistant_tts_text = assistant_text
     if settings.SARVAM_API_KEY and assistant_text:
         async with httpx.AsyncClient(timeout=45.0) as client:
             assistant_tts_text, tts_language = await _translate_assistant_text(client, assistant_text, req.language)
@@ -1497,6 +2299,7 @@ Context from documents:
     return ChatResponse(
         user_text=req.text,
         assistant_text=assistant_text,
+        assistant_tts_text=assistant_tts_text,
         audio_base64=audio_base64,
         citations=citations
     )
@@ -1526,25 +2329,35 @@ async def voice_pipeline(audio: UploadFile = File(...), language: str = Form("au
     if not user_text.strip():
         raise HTTPException(status_code=400, detail="Could not understand speech")
 
-    async with httpx.AsyncClient(timeout=45.0) as client:
-        llm_resp = await client.post(
-            GROQ_CHAT_URL,
-            headers={
-                "Authorization": f"Bearer {settings.GROQ_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": settings.GROQ_MODEL,
-                "messages": [
-                    {"role": "system", "content": "Respond briefly for voice. Prioritize safety."},
-                    {"role": "user", "content": user_text},
-                ],
-                "max_tokens": 256,
-                "temperature": 0.4,
-            },
-        )
-        llm_resp.raise_for_status()
-        assistant_text = llm_resp.json()["choices"][0]["message"]["content"]
+    retrieval_result = retriever.query(
+        query_text=user_text,
+        language=detected_language,
+        role="operator",
+        user_id=None,
+        top_k=5,
+    )
+    evidence = retrieval_result.get("evidence", [])
+    assistant_text = await _generate_grounded_answer(user_text, detected_language, evidence)
+    citations = [
+        Citation(
+            chunk_id=chunk.get("chunk_id", ""),
+            document_code=chunk.get("document_code"),
+            document_title=chunk.get("document_title"),
+            revision_id=chunk.get("revision_id"),
+            revision_label=chunk.get("revision_label"),
+            page_start=chunk.get("page_start"),
+            page_end=chunk.get("page_end"),
+            citation_label=chunk.get("citation_label"),
+            section_title=chunk.get("section_title"),
+            content=chunk.get("content"),
+            block_ids=chunk.get("block_ids") or [],
+            bbox_x0=chunk.get("bbox_x0"),
+            bbox_y0=chunk.get("bbox_y0"),
+            bbox_x1=chunk.get("bbox_x1"),
+            bbox_y1=chunk.get("bbox_y1"),
+        ).model_dump()
+        for chunk in evidence[:4]
+    ]
 
     async with httpx.AsyncClient(timeout=45.0) as client:
         assistant_tts_text, tts_language = await _translate_assistant_text(client, assistant_text, detected_language)
@@ -1557,6 +2370,7 @@ async def voice_pipeline(audio: UploadFile = File(...), language: str = Form("au
         "audio_base64": audio_base64,
         "detected_language": detected_language,
         "tts_language": tts_language,
+        "citations": citations,
     }
 
 
@@ -1583,6 +2397,40 @@ async def health():
             "tts": settings.SARVAM_TTS_MODEL,
         },
     }
+
+
+@app.get("/api/admin/settings")
+async def admin_settings(user_id: str):
+    with engine.connect() as conn:
+        user = _get_user(conn, user_id)
+        _require_admin(user)
+        settings_payload = _get_app_settings(conn)
+    return {"settings": settings_payload}
+
+
+@app.post("/api/admin/settings")
+async def update_admin_settings(req: AdminSettingsUpdateRequest):
+    with engine.begin() as conn:
+        user = _get_user(conn, req.user_id)
+        _require_admin(user)
+        for key, value in req.settings.items():
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO app_settings (setting_key, setting_value, updated_at)
+                    VALUES (:setting_key, CAST(:setting_value AS jsonb), NOW())
+                    ON CONFLICT (setting_key) DO UPDATE SET
+                        setting_value = EXCLUDED.setting_value,
+                        updated_at = NOW()
+                    """
+                ),
+                {
+                    "setting_key": key,
+                    "setting_value": json.dumps(value),
+                },
+            )
+        payload = _get_app_settings(conn)
+    return {"status": "success", "settings": payload}
 
 
 class SOPUploadRequest(BaseModel):
@@ -1618,8 +2466,10 @@ async def upload_sop(
     with engine.connect() as conn:
         user = _get_user(conn, admin_user_id)
         _require_admin(user)
+        identity = _prepare_document_identity(conn, code=code)
+        app_settings = _get_app_settings(conn)
 
-    doc_id = str(uuid.uuid4())
+    doc_id = identity["document_id"]
     revision_id = str(uuid.uuid4())
     safe_name = f"{code}_{revision_id}{file_ext}".replace(" ", "_")
     saved_path = upload_dir / safe_name
@@ -1647,86 +2497,46 @@ async def upload_sop(
             status_code=500,
             detail=f"Processing failed: {type(exc).__name__}: {exc}",
         ) from exc
-    chunks = extraction.get("chunks", [])
+    raw_chunks = extraction.get("chunks", [])
     pages = extraction.get("pages", [])
-    if not chunks:
+    if not raw_chunks:
         raise HTTPException(status_code=400, detail="Could not extract text from document")
 
     from app.services.embedding_service import embed_texts
 
-    contents = [c["content"] for c in chunks]
+    chunk_rows = []
+    for chunk in raw_chunks:
+        chunk_id = str(uuid.uuid4())
+        chunk_rows.append({**chunk, "id": chunk_id, "source_chunk_id": chunk_id})
+
+    contents = [c["content"] for c in chunk_rows]
     embeddings = embed_texts(contents)
+    learning_assets = generate_learning_assets(
+        document_code=code,
+        document_title=title,
+        document_type=document_type,
+        chunks=chunk_rows,
+    )
+    if learning_assets.get("module"):
+        learning_assets["module"]["validity_days"] = int(app_settings.get("certification_validity_days", 365))
+    if learning_assets.get("assessment"):
+        learning_assets["assessment"]["passing_score"] = float(app_settings.get("assessment_passing_score", 70))
 
     with engine.begin() as conn:
-        has_source_filename = conn.execute(
-            text(
-                """
-                SELECT 1
-                FROM information_schema.columns
-                WHERE table_name = 'documents' AND column_name = 'source_filename'
-                """
-            )
-        ).scalar()
-
-        if has_source_filename:
-            conn.execute(
-                text(
-                    """
-                    INSERT INTO documents (
-                        id, code, title, document_type, department_name, source_filename,
-                        is_active, created_at, updated_at
-                    )
-                    VALUES (:id, :code, :title, :doc_type, :dept, :source_filename, true, NOW(), NOW())
-                    """
-                ),
-                {
-                    "id": doc_id,
-                    "code": code,
-                    "title": title,
-                    "doc_type": document_type,
-                    "dept": department,
-                    "source_filename": file.filename,
-                },
-            )
-        else:
-            conn.execute(
-                text(
-                    """
-                    INSERT INTO documents (id, code, title, document_type, department_name, is_active, created_at, updated_at)
-                    VALUES (:id, :code, :title, :doc_type, :dept, true, NOW(), NOW())
-                    """
-                ),
-                {
-                    "id": doc_id,
-                    "code": code,
-                    "title": title,
-                    "doc_type": document_type,
-                    "dept": department,
-                },
-            )
-
-        conn.execute(
-            text(
-                """
-                INSERT INTO document_revisions (
-                    id, document_id, revision_label, version_number, is_latest_approved,
-                    file_path, page_count, extraction_classification, extraction_status,
-                    created_at, updated_at
-                )
-                VALUES (
-                    :id, :doc_id, 'v1', 1, true,
-                    :file_path, :page_count, :classification, 'completed',
-                    NOW(), NOW()
-                )
-                """
-            ),
-            {
-                "id": revision_id,
-                "doc_id": doc_id,
-                "file_path": str(saved_path),
-                "page_count": extraction.get("page_count", 0),
-                "classification": extraction.get("classification", "unknown"),
-            },
+        _persist_document_revision(
+            conn,
+            document_id=doc_id,
+            revision_id=revision_id,
+            code=code,
+            title=title,
+            document_type=document_type,
+            department=department,
+            source_filename=file.filename,
+            file_path=str(saved_path),
+            page_count=extraction.get("page_count", 0),
+            classification=extraction.get("classification", "unknown"),
+            version_number=identity["version_number"],
+            revision_label=identity["revision_label"],
         )
 
         page_id_map: dict[int, str] = {}
@@ -1795,7 +2605,7 @@ async def upload_sop(
                     },
                 )
 
-        for i, chunk in enumerate(chunks):
+        for i, chunk in enumerate(chunk_rows):
             citation_label = chunk.get("citation_label")
             if citation_label:
                 citation_label = f"{code} {citation_label}"
@@ -1814,7 +2624,7 @@ async def upload_sop(
                     """
                 ),
                 {
-                    "id": str(uuid.uuid4()),
+                    "id": chunk["id"],
                     "rev_id": revision_id,
                     "idx": chunk["chunk_index"],
                     "chunk_type": chunk.get("chunk_type", "section"),
@@ -1830,6 +2640,13 @@ async def upload_sop(
                 },
             )
 
+        persisted_assets = persist_learning_assets(
+            conn,
+            document_id=doc_id,
+            revision_id=revision_id,
+            assets=learning_assets,
+        )
+
     from app.services.bm25_retriever import refresh_bm25_index
     refresh_bm25_index()
 
@@ -1837,8 +2654,10 @@ async def upload_sop(
         "status": "success",
         "document_id": doc_id,
         "revision_id": revision_id,
-        "chunks_created": len(chunks),
+        "chunks_created": len(chunk_rows),
         "page_count": extraction.get("page_count", 0),
+        "training_module_id": persisted_assets.get("module_id"),
+        "assessment_id": persisted_assets.get("assessment_id"),
         "message": f"SOP '{title}' uploaded and indexed successfully",
     }
 
@@ -1859,8 +2678,10 @@ async def create_sop_text(
     with engine.connect() as conn:
         user = _get_user(conn, admin_user_id)
         _require_admin(user)
+        identity = _prepare_document_identity(conn, code=code)
+        app_settings = _get_app_settings(conn)
 
-    doc_id = str(uuid.uuid4())
+    doc_id = identity["document_id"]
     revision_id = str(uuid.uuid4())
     temp_path = upload_dir / f"{code}_{revision_id}.txt"
     temp_path.write_text(content, encoding="utf-8")
@@ -1869,84 +2690,44 @@ async def create_sop_text(
     from app.services.embedding_service import embed_texts
 
     extraction = process_document(str(temp_path), doc_id, revision_id)
-    chunks = extraction.get("chunks", [])
+    raw_chunks = extraction.get("chunks", [])
     pages = extraction.get("pages", [])
-    if not chunks:
+    if not raw_chunks:
         raise HTTPException(status_code=400, detail="Could not chunk content")
 
-    contents = [c["content"] for c in chunks]
+    chunk_rows = []
+    for chunk in raw_chunks:
+        chunk_id = str(uuid.uuid4())
+        chunk_rows.append({**chunk, "id": chunk_id, "source_chunk_id": chunk_id})
+
+    contents = [c["content"] for c in chunk_rows]
     embeddings = embed_texts(contents)
+    learning_assets = generate_learning_assets(
+        document_code=code,
+        document_title=title,
+        document_type=document_type,
+        chunks=chunk_rows,
+    )
+    if learning_assets.get("module"):
+        learning_assets["module"]["validity_days"] = int(app_settings.get("certification_validity_days", 365))
+    if learning_assets.get("assessment"):
+        learning_assets["assessment"]["passing_score"] = float(app_settings.get("assessment_passing_score", 70))
 
     with engine.begin() as conn:
-        has_source_filename = conn.execute(
-            text(
-                """
-                SELECT 1
-                FROM information_schema.columns
-                WHERE table_name = 'documents' AND column_name = 'source_filename'
-                """
-            )
-        ).scalar()
-
-        if has_source_filename:
-            conn.execute(
-                text(
-                    """
-                    INSERT INTO documents (
-                        id, code, title, document_type, department_name, source_filename,
-                        is_active, created_at, updated_at
-                    )
-                    VALUES (:id, :code, :title, :doc_type, :dept, :source_filename, true, NOW(), NOW())
-                    """
-                ),
-                {
-                    "id": doc_id,
-                    "code": code,
-                    "title": title,
-                    "doc_type": document_type,
-                    "dept": department,
-                    "source_filename": temp_path.name,
-                },
-            )
-        else:
-            conn.execute(
-                text(
-                    """
-                    INSERT INTO documents (id, code, title, document_type, department_name, is_active, created_at, updated_at)
-                    VALUES (:id, :code, :title, :doc_type, :dept, true, NOW(), NOW())
-                    """
-                ),
-                {
-                    "id": doc_id,
-                    "code": code,
-                    "title": title,
-                    "doc_type": document_type,
-                    "dept": department,
-                },
-            )
-
-        conn.execute(
-            text(
-                """
-                INSERT INTO document_revisions (
-                    id, document_id, revision_label, version_number, is_latest_approved,
-                    file_path, page_count, extraction_classification, extraction_status,
-                    created_at, updated_at
-                )
-                VALUES (
-                    :id, :doc_id, 'v1', 1, true,
-                    :file_path, :page_count, :classification, 'completed',
-                    NOW(), NOW()
-                )
-                """
-            ),
-            {
-                "id": revision_id,
-                "doc_id": doc_id,
-                "file_path": str(temp_path),
-                "page_count": extraction.get("page_count", 1),
-                "classification": extraction.get("classification", "digital"),
-            },
+        _persist_document_revision(
+            conn,
+            document_id=doc_id,
+            revision_id=revision_id,
+            code=code,
+            title=title,
+            document_type=document_type,
+            department=department,
+            source_filename=temp_path.name,
+            file_path=str(temp_path),
+            page_count=extraction.get("page_count", 1),
+            classification=extraction.get("classification", "digital"),
+            version_number=identity["version_number"],
+            revision_label=identity["revision_label"],
         )
 
         page_id_map: dict[int, str] = {}
@@ -2014,7 +2795,7 @@ async def create_sop_text(
                     },
                 )
 
-        for i, chunk in enumerate(chunks):
+        for i, chunk in enumerate(chunk_rows):
             citation_label = chunk.get("citation_label")
             if citation_label:
                 citation_label = f"{code} {citation_label}"
@@ -2033,7 +2814,7 @@ async def create_sop_text(
                     """
                 ),
                 {
-                    "id": str(uuid.uuid4()),
+                    "id": chunk["id"],
                     "rev_id": revision_id,
                     "idx": chunk["chunk_index"],
                     "chunk_type": chunk.get("chunk_type", "section"),
@@ -2049,6 +2830,13 @@ async def create_sop_text(
                 },
             )
 
+        persisted_assets = persist_learning_assets(
+            conn,
+            document_id=doc_id,
+            revision_id=revision_id,
+            assets=learning_assets,
+        )
+
     from app.services.bm25_retriever import refresh_bm25_index
     refresh_bm25_index()
 
@@ -2056,7 +2844,9 @@ async def create_sop_text(
         "status": "success",
         "document_id": doc_id,
         "revision_id": revision_id,
-        "chunks_created": len(chunks),
+        "chunks_created": len(chunk_rows),
+        "training_module_id": persisted_assets.get("module_id"),
+        "assessment_id": persisted_assets.get("assessment_id"),
         "message": f"SOP '{title}' created and indexed successfully",
     }
 

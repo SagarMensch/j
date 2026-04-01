@@ -1,178 +1,201 @@
-'use client';
+"use client";
 
-import React, { useEffect } from 'react';
-import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
-import { Logo } from '@/components/ui/logo';
-import { useAuth } from '@/lib/auth-context';
+import React, { useEffect } from "react";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { Logo } from "@/components/ui/logo";
+import { AppLanguage, useAuth } from "@/lib/auth-context";
+import {
+  AnalyticsBarsIcon,
+  DashboardBlocksIcon,
+  DocumentStackIcon,
+  NotificationGridIcon,
+  SettingsMatrixIcon,
+  UsersClusterIcon,
+} from "@/components/ui/icons";
 
-interface SidebarItem {
-  label: string;
+interface NavItem {
+  key: "dashboard" | "analytics" | "users" | "documents" | "settings";
   href: string;
   icon: React.ReactNode;
 }
 
-const sidebarItems: SidebarItem[] = [
-  {
-    label: 'Home',
-    href: '/admin',
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-      </svg>
-    ),
-  },
-  {
-    label: 'Analytics',
-    href: '/admin/analytics',
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-      </svg>
-    ),
-  },
-  {
-    label: 'Users',
-    href: '/admin/users',
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-      </svg>
-    ),
-  },
-  {
-    label: 'Documents',
-    href: '/admin/documents',
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-      </svg>
-    ),
-  },
-  {
-    label: 'Settings',
-    href: '/admin/settings',
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-      </svg>
-    ),
-  },
+const navItems: NavItem[] = [
+  { key: "dashboard", href: "/admin", icon: <DashboardBlocksIcon /> },
+  { key: "analytics", href: "/admin/analytics", icon: <AnalyticsBarsIcon /> },
+  { key: "users", href: "/admin/users", icon: <UsersClusterIcon /> },
+  { key: "documents", href: "/admin/documents", icon: <DocumentStackIcon /> },
+  { key: "settings", href: "/admin/settings", icon: <SettingsMatrixIcon /> },
 ];
+
+const COPY: Record<
+  AppLanguage,
+  {
+    adminTag: string;
+    monitoring: string;
+    signOut: string;
+    nav: Record<NavItem["key"], string>;
+  }
+> = {
+  ENG: {
+    adminTag: "Admin Command",
+    monitoring: "Monitoring Live",
+    signOut: "Sign Out",
+    nav: {
+      dashboard: "Dashboard",
+      analytics: "Analytics",
+      users: "Users",
+      documents: "Documents",
+      settings: "Settings",
+    },
+  },
+  HIN: {
+    adminTag: "Admin Command",
+    monitoring: "Monitoring Live",
+    signOut: "Sign Out",
+    nav: {
+      dashboard: "Dashboard",
+      analytics: "Analytics",
+      users: "Users",
+      documents: "Documents",
+      settings: "Settings",
+    },
+  },
+  HING: {
+    adminTag: "Admin Command",
+    monitoring: "Monitoring Live",
+    signOut: "Sign Out",
+    nav: {
+      dashboard: "Dashboard",
+      analytics: "Analytics",
+      users: "Users",
+      documents: "Documents",
+      settings: "Settings",
+    },
+  },
+};
+
+function currentSectionLabel(pathname: string | null, language: AppLanguage) {
+  const match = navItems.find(
+    (item) =>
+      pathname === item.href ||
+      (item.href !== "/admin" && pathname?.startsWith(item.href)),
+  );
+  return match ? COPY[language].nav[match.key] : COPY[language].nav.dashboard;
+}
 
 export function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, logout, language, setLanguage } = useAuth();
 
   useEffect(() => {
-    if (user === null) return; // Wait for auth to load
-    if (user.role !== 'admin') {
-      router.push('/operator');
+    if (user === null) return;
+    if (user.role !== "admin") {
+      router.push("/operator");
     }
-  }, [user, router]);
+  }, [router, user]);
 
-  // Show loading state while user is being determined
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-muted">Loading...</p>
+      <div className="app-shell min-h-screen">
+        <div className="mx-auto flex min-h-screen max-w-[1580px] items-center justify-center px-3 md:px-4">
+          <div className="tfl-panel w-full max-w-md px-8 py-10 text-center">
+            <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+            <p className="text-sm font-medium text-muted">
+              Loading admin workspace...
+            </p>
+          </div>
         </div>
       </div>
     );
   }
 
-  // Show nothing and let redirect happen if wrong role
-  if (user.role !== 'admin') {
+  if (user.role !== "admin") {
     return null;
   }
 
   return (
-    <div className="min-h-screen flex bg-background">
-      {/* Sidebar */}
-      <aside className="w-64 bg-primary-dark text-white flex flex-col shadow-xl">
-        {/* Logo */}
-        <div className="p-4 border-b border-white/10">
-          <Logo variant="white" size="md" />
-        </div>
+    <div className="app-shell min-h-screen">
+      <header className="sticky top-0 z-40 border-b border-border/90 bg-[rgba(248,251,254,0.92)] backdrop-blur">
+        <div className="mx-auto max-w-[1580px] px-3 py-3 md:px-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-3.5">
+              <Link href="/admin" className="shrink-0">
+                <Logo variant="full" size="sm" />
+              </Link>
+              <div className="hidden h-10 w-px bg-border lg:block" />
+              <div className="hidden lg:block">
+                <p className="tfl-kicker">{COPY[language].adminTag}</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">
+                  {currentSectionLabel(pathname, language)}
+                </p>
+              </div>
+            </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 py-4">
-          <ul className="space-y-1 px-2">
-            {sidebarItems.map((item) => {
-              const isActive = pathname === item.href || 
-                (item.href !== '/admin' && pathname?.startsWith(item.href));
-              return (
-                <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors
-                      ${isActive 
-                        ? 'bg-white/20 text-white' 
-                        : 'text-white/70 hover:text-white hover:bg-white/10'
-                      }`}
+            <div className="flex items-center gap-2.5">
+              <div className="inline-flex items-center rounded-full border border-border bg-white p-1">
+                {(["ENG", "HIN", "HING"] as AppLanguage[]).map((lang) => (
+                  <button
+                    key={lang}
+                    onClick={() => setLanguage(lang)}
+                    className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] transition-colors ${
+                      language === lang
+                        ? "bg-primary text-white"
+                        : "text-muted hover:text-foreground"
+                    }`}
                   >
+                    {lang}
+                  </button>
+                ))}
+              </div>
+              <div className="hidden items-center gap-2 rounded-full border border-border bg-white px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted sm:inline-flex">
+                <span className="h-2.5 w-2.5 rounded-full bg-accent" />
+                {COPY[language].monitoring}
+              </div>
+              <button className="inline-flex h-10 w-10 items-center justify-center rounded-[10px] border border-border bg-white text-muted transition-colors hover:border-primary/20 hover:text-primary">
+                <NotificationGridIcon className="h-4 w-4" />
+              </button>
+              <button className="inline-flex h-10 w-10 items-center justify-center rounded-[10px] border border-border bg-white text-muted transition-colors hover:border-primary/20 hover:text-primary">
+                <SettingsMatrixIcon className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => {
+                  logout();
+                  router.push("/");
+                }}
+                className="inline-flex items-center rounded-[10px] border border-border bg-white px-3 py-2 text-[0.82rem] font-semibold text-foreground transition-colors hover:border-danger/20 hover:text-danger"
+              >
+                {COPY[language].signOut}
+              </button>
+            </div>
+          </div>
+
+          <nav className="mt-3 flex flex-wrap gap-2">
+            {navItems.map((item) => {
+              const isActive =
+                pathname === item.href ||
+                (item.href !== "/admin" && pathname?.startsWith(item.href));
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`tfl-tab ${isActive ? "tfl-tab-active" : ""}`}
+                >
+                  <span className={isActive ? "text-primary" : "text-muted"}>
                     {item.icon}
-                    <span className="font-medium text-sm">{item.label}</span>
-                  </Link>
-                </li>
+                  </span>
+                  <span>{COPY[language].nav[item.key]}</span>
+                </Link>
               );
             })}
-          </ul>
-        </nav>
-
-        {/* User Info */}
-        <div className="p-4 border-t border-white/10">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
-              <span className="text-sm font-medium">
-                {user?.name.charAt(0)}
-              </span>
-            </div>
-            <div>
-              <p className="text-sm font-medium">{user?.name}</p>
-              <p className="text-xs text-white/60">{user?.role}</p>
-            </div>
-          </div>
+          </nav>
         </div>
-      </aside>
+      </header>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col">
-        {/* Top Header */}
-        <header className="bg-white shadow-sm border-b border-border px-6 py-4">
-          <div className="flex items-center justify-between">
-            <h1 className="text-lg font-semibold text-foreground">
-              Jubilant Ingrevia | Admin Panel
-            </h1>
-            <div className="flex items-center gap-4">
-              {/* Notifications */}
-              <button className="relative p-2 text-muted hover:text-primary transition-colors">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-                </svg>
-                <span className="absolute top-1 right-1 w-2 h-2 bg-danger rounded-full" />
-              </button>
-
-              {/* Settings */}
-              <button className="p-2 text-muted hover:text-primary transition-colors">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-              </button>
-            </div>
-          </div>
-        </header>
-
-        {/* Page Content */}
-        <main className="flex-1 p-6 overflow-auto">
-          {children}
-        </main>
-      </div>
+      <main className="relative z-10 mx-auto w-full max-w-[1580px] px-3 py-5 md:px-4">
+        {children}
+      </main>
     </div>
   );
 }

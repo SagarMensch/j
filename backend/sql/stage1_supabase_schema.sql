@@ -201,6 +201,47 @@ create table if not exists certifications (
     updated_at timestamptz not null default now()
 );
 
+create table if not exists notifications (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid not null references users(id) on delete cascade,
+    event_type text not null,
+    severity text not null default 'info',
+    title text not null,
+    message text not null,
+    cta_url text,
+    channel text not null default 'in_app',
+    event_key text unique,
+    status text not null default 'unread',
+    created_at timestamptz not null default now(),
+    read_at timestamptz
+);
+
+create index if not exists idx_notifications_user_created on notifications(user_id, created_at desc);
+create index if not exists idx_notifications_user_status on notifications(user_id, status);
+
+create table if not exists notification_delivery_logs (
+    id uuid primary key default gen_random_uuid(),
+    notification_id uuid not null references notifications(id) on delete cascade,
+    channel text not null,
+    delivery_status text not null default 'delivered',
+    delivered_at timestamptz not null default now(),
+    error_message text
+);
+
+create index if not exists idx_notification_delivery_logs_notification on notification_delivery_logs(notification_id);
+
+create table if not exists admin_audit_logs (
+    id uuid primary key default gen_random_uuid(),
+    actor_user_id uuid references users(id),
+    action text not null,
+    target_type text,
+    target_id text,
+    details jsonb not null default '{}'::jsonb,
+    created_at timestamptz not null default now()
+);
+
+create index if not exists idx_admin_audit_logs_actor_created on admin_audit_logs(actor_user_id, created_at desc);
+
 create table if not exists retrieval_events (
     id uuid primary key default gen_random_uuid(),
     user_id uuid references users(id),
