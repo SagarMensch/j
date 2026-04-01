@@ -23,6 +23,9 @@ nul
 */nul
 .env
 *.json
+!frontend-nextjs/package.json
+!frontend-nextjs/package-lock.json
+!frontend-nextjs/tsconfig.json
 
 # or more precise:
 sample_chunks.json
