@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Report Generation - Operational Trust</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#2109aa",
+                        "background-light": "#f6f5f8",
+                        "background-dark": "#131022",
+                        "accent-red": "#EE2A24",
+                        "accent-amber": "#FFC80A",
+                        "accent-green": "#00823B",
+                        "surface": "#F4F6F8",
+                        "border-color": "#E5E5E5",
+                        "text-main": "#121212",
+                        "text-muted": "#737373"
+                    },
+                    fontFamily: {
+                        "display": ["Plus Jakarta Sans", "sans-serif"]
+                    },
+                    borderRadius: {
+                        "DEFAULT": "1rem", 
+                        "lg": "2rem", 
+                        "xl": "3rem", 
+                        "full": "9999px",
+                        "card": "24px",
+                        "button": "32px"
+                    },
+                    boxShadow: {
+                        "subtle": "0 4px 20px rgba(0,0,0,0.04)"
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background-color: #E5E5E5;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body class="bg-background-light min-h-screen flex items-center justify-center p-4 antialiased text-text-main">
+<!-- Modal Overlay Backdrop -->
+<div class="fixed inset-0 bg-[#121212] bg-opacity-60 flex items-center justify-center z-50 p-4 sm:p-6">
+<!-- Modal Container -->
+<div class="bg-white rounded-card shadow-subtle w-full max-w-[600px] flex flex-col max-h-[921px] overflow-hidden relative">
+<!-- Header -->
+<header class="flex items-center justify-between px-6 py-5 border-b border-border-color shrink-0">
+<div class="flex items-center gap-3 text-text-main">
+<button aria-label="Go back" class="flex items-center justify-center size-10 rounded-full hover:bg-surface transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+<span aria-hidden="true" class="material-symbols-outlined text-2xl">arrow_back</span>
+</button>
+<h2 class="text-xl font-bold leading-tight tracking-[-0.015em]">Generate Forensic Report</h2>
+</div>
+<button aria-label="Close modal" class="flex items-center justify-center size-10 rounded-full hover:bg-surface transition-colors text-text-muted hover:text-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+<span aria-hidden="true" class="material-symbols-outlined text-2xl">close</span>
+</button>
+</header>
+<!-- Scrollable Content -->
+<div class="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-8">
+<!-- Verdict Summary Card -->
+<div class="rounded-card overflow-hidden bg-surface border border-border-color">
+<div class="bg-accent-red px-5 py-4 flex items-center gap-3 text-white">
+<span aria-hidden="true" class="material-symbols-outlined text-3xl" style="font-variation-settings: 'FILL' 1;">warning</span>
+<h3 class="text-xl font-bold tracking-tight">Critical: Forgery Detected</h3>
+</div>
+<div class="p-5 flex flex-col md:flex-row gap-6 items-start md:items-center justify-between bg-white">
+<div class="space-y-1">
+<p class="text-accent-red text-3xl font-bold leading-none tracking-tight">98%</p>
+<p class="text-text-muted text-sm font-medium">Probability of Alteration</p>
+<p class="text-text-main text-base font-medium mt-2">Document ID: <span class="font-bold">TX-8924-A</span></p>
+</div>
+<div class="w-full md:w-[140px] aspect-[4/3] rounded-lg bg-surface border border-border-color overflow-hidden relative shrink-0">
+<img alt="Abstract thermal heatmap showing red high probability zones on a dark document background" class="w-full h-full object-cover" data-alt="Abstract thermal heatmap showing red high probability zones on a dark document background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDaGndwyfNxX4ZaEcVOdIGAQknCCOByz6Ce6YZywUfDB9OJFkaaTRSv6rqqu9YJoYh7bAF0MDI4fj0LcBYa90l47fDZANpAu_bKGrclpPdqZgg3-1BsJWWvIQpK0dHgX5dJhyuRHSyYbcYXxCugEFc9iyV7DvN5wA2PEJCW2Em7LKohtJlxMEhRURxn-XxSupvbgVBeo7MI7ZZbz6orBh_RTN-EaL80mVN4ncOq9QAggVDunViUMSeLMT1bTkLTfyw84QKI-ZNOc44"/>
+</div>
+</div>
+</div>
+<!-- Configuration Section -->
+<div class="space-y-4">
+<h4 class="text-lg font-bold text-text-main tracking-tight">Select Report Contents</h4>
+<div class="space-y-3">
+<!-- Toggle Item 1 -->
+<label class="flex items-start gap-4 p-4 rounded-xl border border-border-color hover:border-primary hover:bg-surface transition-colors cursor-pointer group">
+<div class="relative flex items-center justify-center mt-0.5">
+<input checked="" class="peer sr-only" type="checkbox"/>
+<div class="w-6 h-6 rounded border-2 border-border-color peer-checked:border-primary peer-checked:bg-primary transition-all flex items-center justify-center group-hover:border-primary">
+<span class="material-symbols-outlined text-white text-[16px] opacity-0 peer-checked:opacity-100 transition-opacity" style="font-variation-settings: 'FILL' 1;">check</span>
+</div>
+</div>
+<div class="flex-1">
+<p class="text-text-main font-bold text-base">Evidence Heatmaps</p>
+<p class="text-text-muted text-sm mt-0.5">Include visual overlays of manipulated pixel coordinates.</p>
+</div>
+</label>
+<!-- Toggle Item 2 -->
+<label class="flex items-start gap-4 p-4 rounded-xl border border-border-color hover:border-primary hover:bg-surface transition-colors cursor-pointer group">
+<div class="relative flex items-center justify-center mt-0.5">
+<input checked="" class="peer sr-only" type="checkbox"/>
+<div class="w-6 h-6 rounded border-2 border-border-color peer-checked:border-primary peer-checked:bg-primary transition-all flex items-center justify-center group-hover:border-primary">
+<span class="material-symbols-outlined text-white text-[16px] opacity-0 peer-checked:opacity-100 transition-opacity" style="font-variation-settings: 'FILL' 1;">check</span>
+</div>
+</div>
+<div class="flex-1">
+<p class="text-text-main font-bold text-base">Raw Metadata JSON</p>
+<p class="text-text-muted text-sm mt-0.5">Append complete EXIF and structural metadata dump.</p>
+</div>
+</label>
+<!-- Toggle Item 3 -->
+<label class="flex items-start gap-4 p-4 rounded-xl border border-border-color hover:border-primary hover:bg-surface transition-colors cursor-pointer group">
+<div class="relative flex items-center justify-center mt-0.5">
+<input class="peer sr-only" type="checkbox"/>
+<div class="w-6 h-6 rounded border-2 border-border-color peer-checked:border-primary peer-checked:bg-primary transition-all flex items-center justify-center group-hover:border-primary">
+<span class="material-symbols-outlined text-white text-[16px] opacity-0 peer-checked:opacity-100 transition-opacity" style="font-variation-settings: 'FILL' 1;">check</span>
+</div>
+</div>
+<div class="flex-1">
+<p class="text-text-main font-bold text-base">Analysis Timeline</p>
+<p class="text-text-muted text-sm mt-0.5">Chronological log of document modifications and engine checks.</p>
+</div>
+</label>
+</div>
+</div>
+</div>
+<!-- Sticky Footer -->
+<div class="p-6 border-t border-border-color bg-white shrink-0">
+<button class="w-full h-[56px] bg-primary text-white rounded-button font-bold text-base flex items-center justify-center gap-2 hover:bg-[#1a0788] transition-colors focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-primary shadow-sm">
+<span aria-hidden="true" class="material-symbols-outlined text-xl">picture_as_pdf</span>
+                    Generate PDF
+                </button>
+</div>
+</div>
+</div>
+</body></html>

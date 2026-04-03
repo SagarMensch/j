@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Operational Trust - Investigation Timeline</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#0019A8",
+                        "background-light": "#f6f5f8",
+                        "background-dark": "#131022",
+                        "surface": "#F4F6F8",
+                        "text-main": "#121212",
+                        "muted": "#737373",
+                        "border-color": "#E5E5E5",
+                        "accent-red": "#EE2A24",
+                        "accent-amber": "#FFC80A",
+                        "accent-green": "#00823B",
+                        "tfl-blue": "#0019A8"
+                    },
+                    fontFamily: {
+                        "display": ["Plus Jakarta Sans", "sans-serif"]
+                    },
+                    borderRadius: {
+                        "DEFAULT": "1rem",
+                        "lg": "2rem",
+                        "xl": "3rem",
+                        "full": "9999px",
+                        "card": "24px",
+                        "button": "32px"
+                    },
+                    boxShadow: {
+                        "subtle": "0 4px 20px rgba(0,0,0,0.04)"
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: #FFFFFF;
+            color: #121212;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col antialiased">
+<!-- Header / Minimal Navigation for Focused View -->
+<header class="bg-primary text-white h-20 flex items-center px-6 sticky top-0 z-50">
+<button aria-label="Back to Analysis" class="flex items-center gap-2 hover:opacity-80 transition-opacity">
+<span class="material-symbols-outlined text-2xl" data-icon="arrow_back">arrow_back</span>
+<span class="font-bold text-lg tracking-wide">Back to Analysis</span>
+</button>
+<div class="ml-auto font-bold text-xl tracking-wide">
+            Timeline
+        </div>
+</header>
+<!-- Main Content Area -->
+<main class="flex-1 flex justify-center py-8 px-6 bg-[#FFFFFF]">
+<div class="w-full max-w-2xl bg-surface rounded-card shadow-subtle p-8 border border-border-color">
+<div class="mb-8 border-b border-border-color pb-4">
+<h1 class="text-3xl font-bold text-text-main mb-2">Investigation Timeline</h1>
+<p class="text-muted font-medium">Chronological record of document lifecycle and forensic events.</p>
+</div>
+<!-- Timeline Container -->
+<div class="relative pl-4">
+<!-- Timeline Rail -->
+<div class="absolute left-[23px] top-4 bottom-4 w-[2px] bg-border-color"></div>
+<!-- Event 1: Creation (Blue) -->
+<div class="relative flex items-start gap-6 mb-8 group">
+<div class="absolute left-[-5px] top-1 w-4 h-4 rounded-full bg-primary border-4 border-surface z-10 group-hover:scale-110 transition-transform"></div>
+<div class="ml-8 flex-1 bg-white rounded-xl p-4 shadow-sm border border-border-color">
+<div class="flex items-center gap-2 mb-1">
+<span class="material-symbols-outlined text-primary" data-icon="note_add">note_add</span>
+<h3 class="font-bold text-text-main text-lg">Document Created</h3>
+</div>
+<p class="font-bold text-sm text-text-main mb-2">10:45 AM - Oct 12, 2023</p>
+<p class="text-muted text-sm font-medium">Initial PDF generated via internal system (ID: SYS-8492).</p>
+</div>
+</div>
+<!-- Event 2: Signature (Blue) -->
+<div class="relative flex items-start gap-6 mb-8 group">
+<div class="absolute left-[-5px] top-1 w-4 h-4 rounded-full bg-primary border-4 border-surface z-10 group-hover:scale-110 transition-transform"></div>
+<div class="ml-8 flex-1 bg-white rounded-xl p-4 shadow-sm border border-border-color">
+<div class="flex items-center gap-2 mb-1">
+<span class="material-symbols-outlined text-primary" data-icon="edit_document">edit_document</span>
+<h3 class="font-bold text-text-main text-lg">Signature Applied</h3>
+</div>
+<p class="font-bold text-sm text-text-main mb-2">11:30 AM - Oct 12, 2023</p>
+<p class="text-muted text-sm font-medium">Cryptographic signature attached by authorized user (J. Doe).</p>
+</div>
+</div>
+<!-- Event 3: Unauthorized Modification (Red) -->
+<div class="relative flex items-start gap-6 mb-8 group">
+<div class="absolute left-[-5px] top-1 w-4 h-4 rounded-full bg-accent-red border-4 border-surface z-10 group-hover:scale-110 transition-transform"></div>
+<div class="ml-8 flex-1 bg-white rounded-xl p-4 shadow-sm border border-accent-red/30 relative overflow-hidden">
+<div class="absolute top-0 left-0 w-1 h-full bg-accent-red"></div>
+<div class="flex items-center gap-2 mb-1">
+<span class="material-symbols-outlined text-accent-red" data-icon="warning">warning</span>
+<h3 class="font-bold text-accent-red text-lg">Metadata Modified</h3>
+</div>
+<p class="font-bold text-sm text-text-main mb-2">02:15 PM - Oct 14, 2023</p>
+<p class="text-muted text-sm font-medium">Unauthorized save detected. EXIF data altered outside secured environment.</p>
+</div>
+</div>
+<!-- Event 4: Analysis Initiated (Grey) -->
+<div class="relative flex items-start gap-6 mb-8 group">
+<div class="absolute left-[-5px] top-1 w-4 h-4 rounded-full bg-muted border-4 border-surface z-10 group-hover:scale-110 transition-transform"></div>
+<div class="ml-8 flex-1 bg-white rounded-xl p-4 shadow-sm border border-border-color">
+<div class="flex items-center gap-2 mb-1">
+<span class="material-symbols-outlined text-muted" data-icon="manage_search">manage_search</span>
+<h3 class="font-bold text-text-main text-lg">System Analysis Initiated</h3>
+</div>
+<p class="font-bold text-sm text-text-main mb-2">09:00 AM - Oct 15, 2023</p>
+<p class="text-muted text-sm font-medium">Document ingested into Forensic Engine for deep-pixel scan.</p>
+</div>
+</div>
+<!-- Event 5: Forgery Detected (Red) -->
+<div class="relative flex items-start gap-6 group">
+<div class="absolute left-[-5px] top-1 w-4 h-4 rounded-full bg-accent-red border-4 border-surface z-10 group-hover:scale-110 transition-transform"></div>
+<div class="ml-8 flex-1 bg-white rounded-xl p-4 shadow-sm border border-accent-red/30 relative overflow-hidden">
+<div class="absolute top-0 left-0 w-1 h-full bg-accent-red"></div>
+<div class="flex items-center gap-2 mb-1">
+<span class="material-symbols-outlined text-accent-red" data-icon="policy">policy</span>
+<h3 class="font-bold text-accent-red text-lg">Forgery Detected</h3>
+</div>
+<p class="font-bold text-sm text-text-main mb-2">09:05 AM - Oct 15, 2023</p>
+<p class="text-muted text-sm font-medium">Pixel tampering confirmed (Clone-stamp signature). Confidence: 98%.</p>
+</div>
+</div>
+</div>
+</div>
+</main>
+</body></html>

@@ -1,0 +1,655 @@
+SEQUELSTRING
+AI-Driven Document Verification & Fraud Detection
+Product Requirements Document
+Full-Stack Engineering Specification  |  v2.0
+Confidential  ·  2025
+6
+Detection Engines
+5
+Core Modules
+4
+User Profiles
+< 10s
+Verdict Latency
+Table of Contents
+Part 0 — Document Overview & Team Ownership
+0.1 Purpose of This Document
+This PRD is the single source of truth for building SEQUELSTRING v2.0. Every engineer, designer, and QA analyst must use this document as their primary reference. It defines what to build, how each piece works, and which team member owns each deliverable. Integration conflicts are resolved here.
+0.2 Product Vision
+SEQUELSTRING is an enterprise-grade AI platform that detects forged, tampered, and duplicate documents before they are approved or paid. It uses six forensic detection engines — ELA, SRM, Noiseprint, DINO ViT, OCR Anomaly, and pHash — backed by a U-Net segmentation model, and surfaced through a Next.js web dashboard. The backend is Python with FastAPI. All relational data is stored in PostgreSQL via Supabase. Neo4j is used where graph-structured data provides analytical advantage. The system targets >= 95% detection accuracy and a verdict latency of under 10 seconds per document.
+0.3 Tech Stack Summary
+Layer
+Technology
+Frontend
+Next.js (React framework) — App Router, TypeScript, Tailwind CSS. Deployed on Vercel or containerised with Docker.
+Backend API
+Python 3.11+ with FastAPI. Async endpoints. Uvicorn/Gunicorn production server. All API routes versioned under /api/v1/.
+Primary Database
+PostgreSQL via Supabase. Supabase Auth handles SSO/JWT. Supabase Storage used for file uploads. Supabase Realtime used for live status updates to the frontend.
+Graph Database
+Neo4j — used for duplicate cluster graph, document relationship mapping, and fraud pattern traversal queries. Only used where graph structure adds value over relational queries.
+ML / Inference
+PyTorch 2.x. GPU inference via CUDA. CPU fallback supported. Models served via FastAPI inference endpoints, not a separate model server.
+Task Queue
+Celery with Redis broker. Long-running forensic analysis jobs are dispatched as async Celery tasks so the FastAPI endpoint returns immediately.
+Object Storage
+Supabase Storage (backed by S3-compatible object store). Original files, tensors, segmentation masks, and generated reports stored here.
+Authentication
+Supabase Auth — supports email/password, SSO (SAML/OIDC via Azure AD, Okta), and magic link. JWT issued by Supabase; validated by FastAPI middleware on every request.
+0.4 Team Structure & Module Ownership
+Component / Deliverable
+Owner Role
+Team
+Integration Touchpoint
+Forensic Engine Core (Mod 1)
+Lead AI Engineer
+AI / Backend
+Exposes POST /api/v1/analyze to API Gateway
+U-Net Segmentation Model (Mod 2)
+ML Engineer
+AI / Backend
+Called internally by Mod 1 after ensemble scoring
+Document Ingestion & OCR (Mod 3)
+ML Engineer
+AI / Backend
+Exposes POST /api/v1/ingest; feeds tensor + text to Mod 1
+Duplicate Detection & Neo4j Graph (Mod 4)
+Data Engineer
+Data
+Exposes POST /api/v1/duplicate-check; owns Neo4j schema
+Report Generation & Audit Trail (Mod 5)
+Backend Engineer
+Backend
+Exposes GET /api/v1/report/{id}; writes to Supabase audit table
+Frontend — Analyst & Admin Dashboard
+Frontend Engineer 1
+Frontend
+Consumes /analyze, /report, /audit REST + Supabase Realtime
+Frontend — Submitter Portal
+Frontend Engineer 2
+Frontend
+Consumes /ingest, /status, /certificate endpoints
+Infrastructure, CI/CD, Observability
+DevOps Engineer
+Platform
+Owns Docker, Kubernetes/Railway, GitHub Actions, Grafana
+Part 1 — System Architecture & End-to-End Data Flow
+1.1 High-Level Architecture Overview
+SEQUELSTRING is composed of five layers. Every engineer must understand how a single document flows through all five layers, because integration failures always occur at layer boundaries.
+Layer
+Key Components
+Owner
+Layer 1: Presentation
+Next.js App (Analyst Dashboard, Submitter Portal, Compliance View). Deployed on Vercel. Communicates with backend via REST and Supabase Realtime WebSocket.
+Frontend Engineers 1 & 2
+Layer 2: API Gateway
+FastAPI application. JWT validation middleware (Supabase JWT). Route versioning /api/v1/. Celery task dispatcher for async jobs. Rate limiting via slowapi.
+DevOps + Backend Eng
+Layer 3: Forensic Engine
+6 detection engines (ELA, SRM, Noiseprint, DINO ViT, OCR Anomaly, pHash) + U-Net segmentation. All PyTorch. Runs as Celery worker processes on GPU nodes.
+Lead AI Eng + ML Eng
+Layer 4: Data & Persistence
+Supabase PostgreSQL (submissions, audit, users). Supabase Storage (files, tensors, reports). Redis (Celery broker, status cache). Neo4j (duplicate graph, fraud clusters).
+Data Engineer
+Layer 5: Report & Audit
+Report renderer (PDF + JSON). Audit log writer (append-only Supabase table). Alert dispatcher (email / Teams webhook). Verification certificate issuer.
+Backend Engineer
+1.2 Request Lifecycle — Step by Step
+Every engineer must understand this flow so they know which system is responsible at each step.
+Step 1 — Document submitted. A Finance or HR team member uploads a document through the Next.js portal. The frontend sends a multipart POST directly to Supabase Storage via the Supabase client SDK. The storage bucket path and file metadata are then sent to POST /api/v1/ingest on the FastAPI backend.
+Step 2 — FastAPI validates the Supabase JWT from the request Authorization header, extracts the submitter_id and department from the JWT claims, assigns a UUID v4 submission_id, writes an initial ForensicSubmission record to Supabase PostgreSQL with status=QUEUED, and dispatches a Celery task (analyze_document.delay(submission_id)) to the Redis broker. The endpoint returns immediately with { submission_id, status: 'QUEUED' }.
+Step 3 — The Celery worker picks up the task. Module 3 (Ingestion) downloads the file from Supabase Storage, extracts text via PaddleOCR, runs PII sanitization, generates the 12-channel forensic tensor (RGB + Noise Residual + ELA + DCT channels), and uploads the tensor to Supabase Storage. Status updated to PROCESSING in Supabase via Realtime broadcast.
+Step 4 — Module 1 (Forensic Core) runs all 6 detection engines in parallel using asyncio.gather(). Each engine returns a risk score 0.0–1.0. Scores are weighted and aggregated into the Forensic Risk Score.
+Step 5 — Module 2 (U-Net Segmentation) receives the 12-channel tensor and returns a pixel-level segmentation mask identifying tampered regions. The mask PNG is uploaded to Supabase Storage.
+Step 6 — Module 4 (Duplicate Detection) runs concurrently with Module 2. It computes MD5, pHash, and text MinHash fingerprints of the document and queries Neo4j for near-duplicate matches across all past submissions.
+Step 7 — Module 5 (Report Generator) assembles the complete ForensicSubmission object, writes the final verdict and all scores to Supabase PostgreSQL, generates the PDF report, uploads it to Supabase Storage, and writes the immutable audit log entry. Supabase Realtime broadcasts the status change to COMPLETE, causing the frontend to automatically refresh.
+Step 8 — The Next.js frontend receives the Realtime event, fetches the completed report via GET /api/v1/report/{submission_id}, and renders the Analyst Dashboard: risk gauge, per-engine score chart, annotated document with tamper heatmap, OCR anomaly list, and metadata panel. If verdict is CONFIRMED_FORGERY, an alert is dispatched to the submitter's manager.
+1.3 Canonical Data Object: ForensicSubmission
+This is the Pydantic model used as the data contract across all modules. It maps directly to the forensic_submissions table in Supabase PostgreSQL. No engineer may add or remove fields without a PR approved by the Lead AI Engineer.
+Field
+Definition
+submission_id
+UUID PK. Assigned at API Gateway on submission receipt. Immutable.
+submitter_id
+UUID FK. References Supabase Auth users.id of the person who submitted the document.
+department
+Text. JWT-injected department label: Finance | Procurement | HR | Operations.
+document_type
+Enum. Submitter-declared type: invoice | receipt | certificate | contract | other.
+storage_path
+Text. Supabase Storage path to the original uploaded file. Never modified after ingestion.
+tensor_path
+Text. Supabase Storage path to the 12-channel .pt tensor file generated by Module 3.
+sanitized_text
+Text. OCR-extracted content after PII redaction. Input to ELA, SRM, OCR Anomaly engines.
+ela_score
+Float 0.0–1.0. Risk score from the ELA (Error Level Analysis) engine.
+srm_score
+Float 0.0–1.0. Risk score from the SRM (Statistical Rich Model) engine.
+noiseprint_score
+Float 0.0–1.0. Risk score from the Noiseprint (camera fingerprint CNN) engine.
+dino_vit_score
+Float 0.0–1.0. Risk score from the DINO ViT (patch attention anomaly) engine.
+ocr_anomaly_score
+Float 0.0–1.0. Risk score from the OCR text/amount/date analysis engine.
+phash_score
+Float 0.0–1.0. Duplicate proximity score from the pHash engine (0 = unique, 1 = exact duplicate).
+forensic_risk_score
+Float 0.0–1.0. Weighted ensemble of the 6 engine scores. Primary verdict signal.
+verdict
+Enum. CLEAN | SUSPICIOUS | CONFIRMED_FORGERY. Derived from forensic_risk_score thresholds.
+mask_path
+Text | Null. Supabase Storage path to the U-Net segmentation mask PNG.
+tampered_regions
+JSONB. Array of { region_id, x, y, width, height, area_px, risk_score }.
+ocr_anomalies
+JSONB. Array of detected text anomalies: amount_mismatch, duplicate_ref, suspicious_keyword, invalid_date.
+duplicate_status
+Enum. NO_MATCH | NEAR_DUPLICATE | EXACT_DUPLICATE. Set by Module 4.
+matched_submission_id
+UUID | Null. The submission_id of the matched duplicate, if any.
+md5_hash
+CHAR(32). MD5 fingerprint of the original file bytes.
+exif_stripped
+Boolean. True if EXIF metadata was absent from the uploaded file — itself a risk signal.
+human_verdict
+Enum | Null. Analyst override: CONFIRMED_GENUINE | CONFIRMED_FORGERY. Null until analyst acts.
+human_verdict_by
+UUID | Null. FK to Supabase Auth users.id of the analyst who applied the override.
+human_verdict_reason
+Text | Null. Analyst's stated reason for the override.
+report_path
+Text | Null. Supabase Storage path to the generated PDF report.
+certificate_path
+Text | Null. Supabase Storage path to the verification certificate (CLEAN only).
+status
+Enum. QUEUED | PROCESSING | COMPLETE | FAILED. Broadcast via Supabase Realtime.
+processing_time_ms
+Integer. Total pipeline latency in milliseconds.
+created_at
+Timestamp with time zone. Auto-set by Supabase on insert.
+Part 2 — Frontend: Next.js UI/UX Specifications by User Profile
+The frontend is a single Next.js application using the App Router with TypeScript and Tailwind CSS. Authentication is handled entirely by Supabase Auth — users log in once and the JWT is managed by the Supabase client SDK and passed to all FastAPI calls. Role-based access control is enforced on both the frontend (route guards) and the FastAPI backend (JWT claims check). Four user profiles exist; each is a separate route group in the Next.js app.
+Profile
+Description
+Profile 1
+Document Analyst — Reviews AI verdicts, investigates flagged documents, applies overrides.
+Profile 2
+Finance / HR Submitter — Uploads documents, tracks submission status, downloads certificates.
+Profile 3
+Compliance Manager — Full audit visibility, analytics, alert configuration, regulatory exports.
+Profile 4
+IT / DevOps Engineer — System health monitoring, model configuration, infrastructure controls.
+Profile 1 — Document Analyst
+Navigation: 5 Tabs
+Tab 1 — Forensic Dashboard (Default)
+The primary workspace. Displays the full forensic report for a selected submission.
+Risk Score Gauge: Large semi-circular gauge rendered with a Recharts RadialBarChart. Color-coded: 0–40 green (CLEAN), 40–70 amber (SUSPICIOUS), 70–100 red (CONFIRMED FORGERY). Verdict label in bold beneath the gauge.
+Engine Score Bar Chart: Horizontal bar chart (Recharts BarChart) with one bar per engine. Labels: ELA, SRM, Noiseprint, DINO ViT, OCR Anomaly, pHash. Bars above 50% render red; below render green. This is the primary tool for understanding which forensic signal drove the verdict.
+Document Viewer with Tamper Overlay: The original document renders in the right panel using a Next.js Image component or PDF.js for PDFs. The U-Net segmentation mask is overlaid as a semi-transparent canvas heat map using an HTML5 Canvas element. The analyst can toggle the overlay with a checkbox. Clicking a highlighted region opens a Shadcn Sheet panel showing the TamperedRegion data.
+OCR Anomaly Panel: Structured list of OCR anomalies. Each is a Shadcn Card: type badge (AMOUNT_MISMATCH, DUPLICATE_REF, SUSPICIOUS_KEYWORD, INVALID_DATE), description, and a link to the relevant region in the document viewer.
+Metadata Panel: EXIF/metadata display — creation tool, creation date, MD5 hash. If exif_stripped = true, a red warning badge reads 'EXIF STRIPPED — Suspicious'.
+Analyst Override Controls: Two buttons — 'Mark as Genuine' and 'Confirm Forgery'. Both open a Shadcn Dialog requiring a reason selection from a dropdown and an optional free-text note. On submit, calls POST /api/v1/report/override. The AI score is preserved; the human_verdict field is updated.
+Tab 2 — Review Queue
+Filterable table of all SUSPICIOUS submissions awaiting analyst review. Built with TanStack Table.
+Columns: Submission ID, Document Type, Submitter, Department, Risk Score, Submission Date, Status.
+Filters: Department, Document Type, Date Range, Score Range. All filters are URL-searchParam driven for shareability.
+Clicking any row navigates to /analyst/dashboard?id={submission_id}, loading the Forensic Dashboard for that submission.
+Status updates arrive via Supabase Realtime subscription on the forensic_submissions table — new items appear in the queue without page refresh.
+Tab 3 — Submission History
+Read-only table of all completed submissions. Full-text search by submission_id, submitter name, MD5 hash.
+Server-side pagination via FastAPI query params: ?page=1&limit=50&verdict=CONFIRMED_FORGERY.
+Export to CSV button calls GET /api/v1/submissions/export with current filters applied.
+Tab 4 — Duplicate Tracker
+Displays duplicate document clusters sourced from the Neo4j graph via GET /api/v1/duplicate-check/clusters.
+Cluster cards show: document thumbnails, submission IDs, submitters, dates, and pHash similarity scores.
+Analyst can flag a cluster as: Confirmed Fraud | Under Investigation | False Positive. Flag written to Neo4j cluster node.
+Tab 5 — Analytics
+KPI tiles: Total submissions, forgery detection rate, average risk score, average processing time.
+Forgery rate by department — stacked bar chart (Recharts).
+Engine trigger frequency — shows which of the 6 engines is most commonly the primary fraud signal.
+Date range picker (React Day Picker) controls all charts on this tab.
+Profile 2 — Finance / HR Submitter
+Navigation: 3 Tabs
+Tab 1 — Submit Document (Default)
+Drag-and-drop upload zone (React Dropzone). Accepted types: PDF, JPEG, PNG, DOCX. Max size: 10 MB.
+Document Type selector (required): Invoice | Receipt | Certificate | Contract | Other.
+On submit: file is uploaded directly to Supabase Storage using the Supabase JS client (supabase.storage.from('documents').upload(...)). The storage_path is then POSTed to POST /api/v1/ingest.
+Progress states rendered as a Shadcn Stepper: Uploading → Queued → Processing → Complete. Each state transition arrives via Supabase Realtime subscription on the submission's status field.
+On CLEAN verdict: green success banner with submission_id and a 'Download Certificate' button that calls GET /api/v1/report/{id}/certificate.
+On CONFIRMED_FORGERY: red banner reading 'This document has been flagged for review. Reference: [submission_id]. Your compliance team has been notified.'
+Tab 2 — My Submissions
+Personal submission history. Columns: Submission ID, Document Type, Date, Status, Verdict.
+Verdict badge: green CLEAN, amber SUSPICIOUS, red FLAGGED. Submitters do not see engine scores or forensic detail.
+Realtime updates: Supabase Realtime subscription filtered to submitter_id = current user.
+Tab 3 — Help
+Static Next.js page explaining: accepted document types, what a flagged verdict means, how to contest a verdict, and compliance team contact.
+Profile 3 — Compliance Manager
+Navigation: 5 Tabs
+Tab 1 — Compliance Overview
+KPI tiles: Total Submissions (period), Forgery Detection Rate, Documents Under Review, Override Rate.
+Recent Flags Feed: Realtime list of CONFIRMED_FORGERY verdicts in the last 24 hours.
+Alert Configuration: Manager sets email / Teams webhook URL for verdicts above a configurable risk score threshold, per department.
+Tab 2 — Full Audit Log
+Immutable, searchable log table from the Supabase audit_log table.
+Columns: Timestamp, Submitter ID, Analyst ID, Action Type, Document Type, Verdict, Risk Score.
+Filters: Date range, Action Type, Department, Verdict. Export to CSV via GET /api/v1/audit/export.
+Tab 3 — Override History
+All analyst overrides: AI verdict vs. human verdict, reason, analyst ID, timestamp. Used to audit analyst calibration and identify systematic disagreements with the model.
+Tab 4 — Regulatory Export
+Generate compliance PDF reports: all submissions in a date range, with verdicts, evidence summaries, and analyst sign-offs. Format configurable for regulatory submission.
+Tab 5 — Model Performance
+Detection rate, false positive rate (estimated from overrides), engine contribution breakdown. Trend chart. Button to submit a model review request to the ML Engineer.
+Profile 4 — IT / DevOps Engineer
+Navigation: 4 Tabs
+Tab 1 — System Health
+Service status cards: FastAPI, Celery workers, Redis, Supabase (PostgreSQL + Storage + Realtime), Neo4j. Each card shows status, uptime %, avg latency, error rate. Data sourced from Grafana API or direct /health endpoints.
+Processing queue depth: live Redis queue size. Alert threshold: > 50 items for > 5 minutes.
+Tab 2 — Model Configuration
+Engine weight table: configurable weight per engine. Weights must sum to 1.0. Saved to a model_config table in Supabase PostgreSQL. FastAPI reads this table on startup and caches in Redis.
+Verdict threshold sliders: CLEAN/SUSPICIOUS boundary (default 0.40) and SUSPICIOUS/CONFIRMED_FORGERY boundary (default 0.85).
+Feature flags: toggle individual engines on/off without redeployment.
+Tab 3 — Infrastructure
+Docker container / Kubernetes pod status, CPU/memory, restart counts.
+GPU utilization: CUDA memory and compute % for inference worker pods.
+Deployment history with rollback buttons (calls GitHub Actions workflow dispatch API).
+Tab 4 — Security
+API key management (for integration clients using API key auth instead of SSO).
+Supabase Auth user audit: active sessions, failed login attempts.
+Rate limit monitor: per-client request rates from slowapi metrics.
+Part 3 — Backend: Module-by-Module Engineering Specification
+Engineering Principles That Apply to All Modules
+All backend code is Python 3.11+. Type hints are mandatory throughout. FastAPI's dependency injection system is used for auth, database sessions, and shared services.
+All FastAPI endpoints are async. Blocking I/O (file reads, model inference) is dispatched to Celery workers — never run synchronously in an endpoint handler.
+No hardcoded secrets. All credentials (Supabase URL, Supabase service role key, Neo4j URI, Redis URL) are loaded from environment variables via pydantic-settings.
+Every FastAPI endpoint validates the Supabase JWT using a reusable FastAPI Depends(get_current_user) dependency. Unauthenticated requests receive HTTP 401.
+Every service exposes GET /health and GET /metrics. Prometheus scrapes /metrics. If your service doesn't expose these, the DevOps engineer cannot monitor it.
+All Supabase PostgreSQL writes that modify multiple rows must use database transactions. Partial writes are a critical bug.
+Module 1 — Forensic Engine Core
+Owner: Lead AI Engineer
+1.1 What This Module Does
+Module 1 is the detection brain. It receives the 12-channel tensor path and sanitized text from Module 3, runs all 6 detection engines in parallel, aggregates scores into the Forensic Risk Score, and returns per-engine scores and the verdict. It does not segment tamper regions (Module 2) and does not ingest documents (Module 3).
+1.2 The 6 Detection Engines
+#
+Engine
+Implementation Detail
+01
+ELA
+Error Level Analysis — JPEG re-compression map.
+The document image is re-saved at quality=90 JPEG. The absolute pixel-wise difference between original and re-saved versions is computed per channel. Edited regions — where someone changed numbers or text using image software — were last compressed at a different quality level, so they produce higher error values than the unmodified surrounding areas. The ELA map is one of the three input channel groups in the 12-channel tensor.
+Score: Mean error level in the top-10% highest-error regions, normalized to 0.0–1.0.
+02
+SRM
+Statistical Rich Model — 30-kernel steganalysis.
+30 high-pass convolution kernels are applied to the grayscale document image, producing a rich set of residual maps. Each kernel is designed to suppress image content and amplify manipulation artifacts. The resulting 30-channel feature map is passed through a shallow classifier (linear layer) trained on the DocTamper dataset to produce a per-document manipulation score.
+Score: Classifier output probability of the TAMPERED class, 0.0–1.0.
+03
+Noiseprint
+Camera fingerprint CNN — noise consistency analysis.
+Every scanner or camera imprints a unique, invisible noise pattern on every image it produces. A CNN (DnCNN architecture) extracts the noise residual from the document image by subtracting a denoised version from the original. If all regions of the document came from the same scanner, the residual pattern is spatially consistent. If part of the document was digitally pasted in from another source, its noise pattern differs — Noiseprint measures this inconsistency as an autocorrelation anomaly score.
+Score: Spatial inconsistency score from the normalized noise residual correlation map, 0.0–1.0.
+04
+DINO ViT
+Patch attention anomaly — Vision Transformer self-supervised analysis.
+The document image is divided into non-overlapping 8x8 patches. facebook/dino-vits8 encodes each patch into a feature vector using its self-supervised Vision Transformer. The cosine similarity between each patch's feature vector and the mean feature vector of all other patches from the same document is computed. Tampered patches — those pasted from another document or heavily edited — produce feature vectors that are dissimilar to the document's natural distribution. The anomaly score is the proportion of patches exceeding a dissimilarity threshold.
+Score: Fraction of anomalous patches weighted by their dissimilarity magnitude, 0.0–1.0.
+05
+OCR Anomaly
+Text / amount / date consistency checker.
+Operates on the sanitized_text extracted by Module 3 (PaddleOCR). Four checks run in sequence: (1) Amount Consistency — all monetary values are extracted with a regex; line item subtotals are summed and compared to any stated total; a mismatch > 1% tolerance triggers the flag. (2) Duplicate Reference — all reference codes, invoice numbers, and PO numbers are extracted; duplicates within the same document or across same-submitter history trigger the flag. (3) Suspicious Keyword — scan for 'copy', 'test', 'sample', 'draft', 'template', 'void'. (4) Date Plausibility — all dates extracted and validated; dates > 5 years past or in the future are flagged.
+Score: Weighted sum of triggered checks. Each check has a configurable weight. Default: amount_mismatch=0.40, duplicate_ref=0.30, suspicious_keyword=0.15, invalid_date=0.15.
+06
+pHash
+Perceptual hash — duplicate submission detector.
+A 64-bit perceptual hash (pHash via the imagehash library) is computed from the rasterized document image. The hash is stored in the fingerprints table in Supabase PostgreSQL and simultaneously written to the Neo4j graph as a DocumentNode. On every new submission, a Hamming distance query finds all previously stored pHashes within a configurable distance threshold (default: 8 bits). Distance 0 = exact visual duplicate; distance 1–8 = near-duplicate (minor edits). The pHash score represents how close the nearest match is.
+Score: 1.0 - (hamming_distance / 64). Score 1.0 = exact duplicate, 0.875 = 8-bit difference, 0.0 = completely different.
+1.3 Score Aggregation & Verdict Logic
+The Forensic Risk Score is a weighted average of all 6 engine scores. Default weights: ELA 0.20, SRM 0.20, Noiseprint 0.20, DINO ViT 0.15, OCR Anomaly 0.15, pHash 0.10. Weights are stored in the model_config Supabase table and cached in Redis. They must always sum to 1.0.
+Verdict thresholds (configurable via the DevOps UI, stored in model_config): score < 0.40 = CLEAN (auto-approved, certificate issued); 0.40–0.85 = SUSPICIOUS (routed to analyst review queue); score >= 0.85 = CONFIRMED_FORGERY (alert dispatched, submission blocked from approval).
+1.4 API Contract
+Endpoint
+Specification
+POST /api/v1/analyze
+Internal — called by Celery worker. Body: { submission_id }. Reads tensor_path and sanitized_text from Supabase. Runs 6 engines. Updates ForensicSubmission with engine scores and verdict. Returns: { submission_id, forensic_risk_score, verdict, engine_scores }.
+GET /api/v1/analyze/status/{id}
+Public. Returns current status and verdict if complete. Used by frontend polling fallback if Supabase Realtime is unavailable.
+Module 2 — U-Net Segmentation Model
+Owner: ML Engineer
+2.1 What This Module Does
+Module 2 answers: where exactly was the document tampered? It produces a pixel-level segmentation mask showing the precise tampered regions — rendered as the heat map overlay in the Analyst Dashboard.
+2.2 Model Architecture & Training
+Architecture: segmentation_models_pytorch.Unet with encoder_name='efficientnet-b4', encoder_weights='imagenet', in_channels=12, classes=1.
+Input: 12-channel tensor (3 RGB + 3 Noise Residual + 3 ELA + 3 DCT). Resolution: 512x512. Normalized with Albumentations.Normalize().
+Output: Single-channel probability mask (512x512). Each pixel value is the probability that the pixel is part of a tampered region.
+Post-processing: Binary mask at threshold 0.5. Connected components analysis (scipy.ndimage.label) identifies discrete tampered regions. Each region encoded as a TamperedRegion: { region_id, x, y, width, height, area_px, risk_score }.
+Training: DocTamperV1 dataset. DiceLoss. AdamW, lr=2e-4. 24 epochs. Batch size 10. DataParallel for multi-GPU. Early stopping patience 8. Training script: /model/train.py. Model artifact registered in MLflow.
+Inference: model loaded from MLflow Model Registry on Celery worker startup. CUDA device if available, CPU fallback with warning.
+2.3 API Contract
+Endpoint
+Specification
+POST /api/v1/segment
+Internal — called by Module 1 Celery task after ensemble scoring. Body: { submission_id }. Reads tensor_path, runs U-Net inference, uploads mask PNG to Supabase Storage, updates ForensicSubmission with mask_path and tampered_regions. Returns: { mask_path, tampered_regions }.
+Module 3 — Document Ingestion & OCR
+Owner: ML Engineer
+3.1 What This Module Does
+Module 3 is the document preprocessor. Every uploaded document passes through this pipeline before forensic analysis begins. It extracts text, generates the 12-channel forensic tensor, sanitizes PII, and detects OCR-level anomalies. It is triggered as the first step in the Celery task chain.
+3.2 Ingestion Pipeline — Stage by Stage
+Stage 1 — File Validation
+File is downloaded from Supabase Storage using the Supabase Python client (supabase.storage.from_('documents').download(storage_path)).
+MIME type validation: application/pdf, image/jpeg, image/png, image/tiff, application/vnd.openxmlformats-officedocument.wordprocessingml.document. Any other type fails the job with status=FAILED and an error code of INVALID_MIME_TYPE.
+File size check: max 10 MB enforced at this stage as a Celery worker check (size limit also enforced at the FastAPI upload endpoint).
+Stage 2 — Text Extraction (OCR)
+PDF: PaddleOCR (primary). If the PDF has no embedded text layer (scanned-only), DocTR is used as fallback.
+Images (JPEG/PNG/TIFF): PaddleOCR processes the image directly.
+DOCX: python-docx extracts paragraphs and table cell text.
+Result: raw_extracted_text as a UTF-8 string.
+Stage 3 — PII Sanitization
+Pass 1 — Regex: Indian PAN, Aadhaar, bank account numbers, IFSC codes, phone numbers, email addresses.
+Pass 2 — NER: spaCy en_core_web_trf identifies PERSON, ORG, GPE entities.
+Matched entities replaced with typed placeholders: [PAN_REDACTED], [AADHAAR_REDACTED], [BANK_ACCOUNT_REDACTED], [PERSON_NAME_REDACTED].
+sanitized_text is written to ForensicSubmission in Supabase. raw_extracted_text is discarded from worker memory immediately.
+Stage 4 — OCR Anomaly Pre-Detection
+Amount Consistency: All monetary values extracted via regex. Line items summed and compared against any stated total. Mismatch > 1% = ocr_anomaly entry of type AMOUNT_MISMATCH.
+Duplicate Reference: All reference/invoice/PO numbers extracted. Duplicates within document or across same-submitter history (queried from Supabase) = DUPLICATE_REF anomaly.
+Suspicious Keywords: Scan for 'copy', 'test', 'sample', 'draft', 'template', 'void' = SUSPICIOUS_KEYWORD anomaly.
+Date Plausibility: All dates parsed and validated. Dates > 5 years past or future = INVALID_DATE anomaly.
+ocr_anomalies JSONB array written to ForensicSubmission. ocr_anomaly_score computed by Module 1 from this array.
+Stage 5 — 12-Channel Tensor Generation
+Document rasterized to 512x512 PNG at 300 DPI using pdf2image (PDFs) or Pillow (images).
+Channel Group 1 (RGB): Standard 3-channel image.
+Channel Group 2 (Noise Residual): Per-channel Gaussian blur subtracted from original, result multiplied by 10 and clipped to [0, 255].
+Channel Group 3 (ELA): Image re-saved at quality=90 JPEG; absolute difference between original and re-saved, normalized per channel.
+Channel Group 4 (DCT): Block DCT on 8x8 tiles. Low (coefficients [0:2, 0:2]), mid ([2:5, 2:5]), and high ([5:, 5:]) frequency bands stored as 3 channels.
+All 12 channels stacked and normalized with Albumentations.Normalize(). Saved as a .pt PyTorch tensor file and uploaded to Supabase Storage.
+3.3 EXIF Metadata Extraction
+EXIF metadata extracted using the exifread library. If no EXIF data is present, exif_stripped is set to True on ForensicSubmission — a significant risk signal used by the OCR Anomaly engine.
+Extracted EXIF fields (if present): Software, DateTime, Make, Model stored in a metadata JSONB column in Supabase.
+3.4 API Contract
+Endpoint
+Specification
+POST /api/v1/ingest
+Called by FastAPI route handler after file upload confirmation. Body: { submission_id, storage_path, document_type }. Dispatches Celery task chain: ingest → analyze → segment. Returns: { submission_id, status: 'QUEUED' }.
+GET /api/v1/ingest/status/{id}
+Returns current ingestion stage. Used as polling fallback if Supabase Realtime is unavailable.
+Module 4 — Duplicate Detection & Neo4j Graph
+Owner: Data Engineer
+4.1 What This Module Does
+Module 4 detects documents submitted multiple times — even with minor edits to amounts, dates, or reference numbers. It maintains a fingerprint index in Supabase PostgreSQL and a document relationship graph in Neo4j. The Neo4j graph enables fraud pattern queries that relational queries cannot efficiently answer — such as 'find all documents from the same submitter that are visually similar to each other across different vendors'.
+4.2 When Neo4j Is Used vs. PostgreSQL
+Query Type
+Use PostgreSQL
+Use Neo4j
+Exact duplicate check
+MD5 hash lookup — O(1) indexed query.
+Not needed.
+Near-duplicate check
+pHash Hamming distance on indexed column for single queries.
+Graph traversal for cluster membership: 'find all docs within 8-bit Hamming distance of this submission's pHash node'.
+Fraud cluster analysis
+Not efficient for multi-hop similarity traversal.
+MATCH (d1:Document)-[:SIMILAR_TO]->(d2:Document) WHERE d1.submitter_id = $id RETURN d2 — finds all visually similar docs across submitter history.
+Submitter fraud network
+Not efficient for graph traversal.
+Identify submitters who share duplicate document clusters across departments — multi-hop graph query.
+4.3 Neo4j Schema
+Node Labels
+Document: Properties: submission_id (string, unique), phash (string), submitter_id, department, verdict, created_at.
+Submitter: Properties: submitter_id (string, unique), department.
+FraudCluster: Properties: cluster_id (string, unique), status (CONFIRMED_FRAUD | UNDER_INVESTIGATION | FALSE_POSITIVE), flagged_at.
+Relationship Types
+Relationship
+Definition
+(Document)-[:SIMILAR_TO]->(Document)
+Created when pHash Hamming distance < 8. Properties: hamming_distance, similarity_score.
+(Submitter)-[:SUBMITTED]->(Document)
+Created on every new submission.
+(Document)-[:MEMBER_OF]->(FraudCluster)
+Created when an analyst flags a cluster as fraud in the Duplicate Tracker tab.
+4.4 Fingerprinting Strategy
+Exact Match (MD5): MD5 hash of raw file bytes. Stored in fingerprints table in Supabase PostgreSQL. O(1) lookup. Detects byte-identical resubmissions.
+Near-Duplicate (pHash): 64-bit perceptual hash via imagehash library. Stored in both Supabase PostgreSQL (for range queries) and as a Document node property in Neo4j. Hamming distance < 8 = near-duplicate.
+Text Fingerprint (MinHash): 128-band MinHash signature from the sanitized_text token set using datasketch. Jaccard similarity > 0.85 = text duplicate. Stored in Supabase PostgreSQL.
+Composite verdict: EXACT_DUPLICATE if MD5 matches. NEAR_DUPLICATE if pHash distance < 8 OR MinHash Jaccard > 0.85. NO_MATCH otherwise.
+4.5 API Contract
+Endpoint
+Specification
+POST /api/v1/duplicate-check
+Internal. Body: { submission_id }. Reads file from Supabase Storage, computes fingerprints, queries Supabase + Neo4j. Updates ForensicSubmission with duplicate_status and matched_submission_id. Returns: { duplicate_status, matched_submission_id, similarity_score }.
+GET /api/v1/duplicate-check/clusters
+Public (Analyst role). Returns all Neo4j FraudCluster nodes with their member Documents. Used by Duplicate Tracker tab.
+PATCH /api/v1/duplicate-check/clusters/{id}
+Public (Analyst role). Updates FraudCluster status. Body: { status: 'CONFIRMED_FRAUD' | 'UNDER_INVESTIGATION' | 'FALSE_POSITIVE' }.
+Module 5 — Report Generation & Audit Trail
+Owner: Backend Engineer
+5.1 What This Module Does
+Module 5 is the final assembly and output step. It generates the human-readable PDF report, writes the immutable audit log entry to Supabase, dispatches CONFIRMED_FORGERY alert notifications, and issues verification certificates for CLEAN documents. It runs as the final step in the Celery task chain after Modules 1, 2, and 4 have completed.
+5.2 Report Generation
+JSON Report: Serialized ForensicSubmission Pydantic model. Stored in Supabase Storage. Returned by GET /api/v1/report/{id}.
+PDF Report: Generated using reportlab. Pages: (1) Cover with verdict badge and risk gauge visual; (2) Per-engine scores table; (3) Annotated document image with tamper region bounding boxes drawn using Pillow; (4) OCR anomaly log; (5) Metadata summary including exif_stripped flag; (6) Analyst notes if a human override has been applied. Stored in Supabase Storage at report_path.
+Verification Certificate: CLEAN documents only. One-page PDF stamped with submission_id, MD5 hash, timestamp, document_type, submitter_id, and 'Verified Clean by SEQUELSTRING v2.0'. Stored at certificate_path.
+5.3 Audit Log (Supabase PostgreSQL)
+An audit_log table in Supabase PostgreSQL records every state change to every ForensicSubmission.
+Columns: id (UUID PK), submission_id (FK), event_type (TEXT: SUBMITTED | INGESTION_COMPLETE | ANALYSIS_COMPLETE | VERDICT_ASSIGNED | HUMAN_OVERRIDE | REPORT_ACCESSED | CERTIFICATE_DOWNLOADED | REPORT_EXPORTED), actor_id (UUID — system or human), previous_status, new_status, metadata (JSONB), created_at.
+Row-Level Security (RLS) policy in Supabase enforces INSERT only — no UPDATE or DELETE is permitted for any role including service_role. Immutability is enforced at the database layer.
+Supabase RLS policy: CREATE POLICY audit_insert_only ON audit_log FOR INSERT WITH CHECK (true); — SELECT is granted to compliance_manager and analyst roles; no UPDATE or DELETE policy defined.
+5.4 Alert Notifications (CONFIRMED_FORGERY)
+Trigger: verdict = CONFIRMED_FORGERY at the end of the Celery task chain.
+Notification channels (configurable per deployment in alert_config Supabase table): email via SendGrid or Resend API, Microsoft Teams incoming webhook, or Slack webhook.
+Payload: submitter_id, department, document_type, forensic_risk_score, submission_id, link to /analyst/dashboard?id={submission_id}.
+SLA: Alert dispatched within 30 seconds of CONFIRMED_FORGERY verdict assignment.
+5.5 API Contract
+Endpoint
+Specification
+GET /api/v1/report/{id}
+Returns complete ForensicSubmission JSON. Requires Analyst or Compliance Manager role. Writes REPORT_ACCESSED to audit_log.
+GET /api/v1/report/{id}/pdf
+Returns PDF report as file download. Requires Analyst role.
+GET /api/v1/report/{id}/certificate
+Returns verification certificate PDF. Only available if verdict = CLEAN. Accessible by the submission's own submitter_id.
+GET /api/v1/audit
+Returns paginated audit_log rows. Filters: submission_id, actor_id, event_type, date range. Requires Compliance Manager role.
+GET /api/v1/audit/export
+Returns audit_log as CSV download. Requires Compliance Manager role. Writes REPORT_EXPORTED to audit_log.
+POST /api/v1/report/override
+Body: { submission_id, human_verdict, reason, notes }. Requires Analyst role. Updates ForensicSubmission human_verdict fields. Writes HUMAN_OVERRIDE to audit_log. Returns updated ForensicSubmission.
+Part 4 — Data Models & Supabase Schema
+4.1 Supabase PostgreSQL — Table Summary
+Table
+Contents & Notes
+forensic_submissions
+Primary data table. Maps directly to ForensicSubmission Pydantic model. All engine scores, verdicts, storage paths, and JSONB blobs stored here.
+audit_log
+Append-only event log. RLS enforces INSERT only — no UPDATE or DELETE for any role. Used by Compliance Manager audit tab and regulatory export.
+fingerprints
+MD5, pHash, and MinHash signatures per submission. Indexed on md5_hash and phash for fast lookup. Foreign key to forensic_submissions.submission_id.
+model_config
+Engine weights, verdict thresholds, feature flags. Read by FastAPI on startup, cached in Redis. Written by DevOps profile via the configuration UI.
+alert_config
+Notification channel configuration per department: channel type (email/teams/slack), webhook URL or email address, threshold score. Written by Compliance Manager profile.
+users (Supabase Auth)
+Managed by Supabase Auth. Extended with a profiles table: user_id FK, department, role (analyst | submitter | compliance_manager | devops). Role used by FastAPI RLS and frontend route guards.
+4.2 Redis — Key Usage
+Key Pattern
+Purpose
+submission:status:{id}
+Hot cache for submission status. Written by Celery worker on each stage transition. TTL: 1 hour after COMPLETE.
+model:config
+Cached copy of the model_config Supabase table. Refreshed on write via a Supabase Database Webhook that POSTs to a FastAPI cache invalidation endpoint.
+celery:{queue_name}
+Celery broker queues. Separate queues: analysis (GPU workers) and ingestion (CPU workers).
+4.3 Integration Map — Who Calls What
+Caller
+Endpoint / Service
+Provided By
+Next.js (Submitter)
+Supabase Storage SDK (file upload), POST /api/v1/ingest
+Supabase + Module 3
+Next.js (Submitter)
+Supabase Realtime subscription on forensic_submissions.status
+Supabase
+Next.js (Analyst)
+GET /api/v1/report/{id}, POST /api/v1/report/override
+Module 5
+Next.js (Analyst)
+GET /api/v1/duplicate-check/clusters
+Module 4
+Next.js (Compliance)
+GET /api/v1/audit, GET /api/v1/audit/export
+Module 5
+FastAPI route handler
+analyze_document.delay(submission_id) — Celery task
+Redis broker
+Celery worker (analysis)
+POST /api/v1/analyze (internal), POST /api/v1/segment (internal)
+Modules 1 & 2
+Celery worker (analysis)
+POST /api/v1/duplicate-check (concurrent)
+Module 4
+Celery worker (final step)
+Report generation + Supabase audit_log INSERT + alert dispatch
+Module 5
+Part 5 — Infrastructure, Deployment & CI/CD
+Owner: DevOps Engineer
+5.1 Service Architecture
+Service
+Deployment Notes
+Next.js Frontend
+Deployed on Vercel (recommended) or as a Docker container. Environment variables: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, NEXT_PUBLIC_API_BASE_URL.
+FastAPI Backend
+Docker container. Uvicorn with Gunicorn. Deployed on Railway, Render, AWS ECS, or Kubernetes. Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, REDIS_URL, SECRET_KEY.
+Celery Workers — Analysis
+Separate Docker container. Requires GPU node (NVIDIA CUDA). Concurrency: 1 per GPU (GPU is the bottleneck). Autoscaled on Redis queue depth via KEDA or Railway autoscaling.
+Celery Workers — Ingestion
+Separate Docker container. CPU-only. Concurrency: 4 per node. Autoscaled on ingestion queue depth.
+Redis
+Managed Redis via Railway, Upstash, or AWS ElastiCache. Used as Celery broker and status cache.
+Supabase
+Managed Supabase project (cloud). PostgreSQL, Auth, Storage, Realtime all included. No self-hosted Supabase unless data residency requires it.
+Neo4j
+Neo4j AuraDB (managed cloud) for production. Neo4j Desktop or Docker for local development. Connection via official Python neo4j driver.
+5.2 CI/CD Pipeline (GitHub Actions)
+Branch strategy: main (production), staging (QA), feature/* (development). All PRs require passing tests and a review from the module owner.
+Pipeline stages: Lint (ruff + eslint) → Type Check (mypy + tsc) → Unit Tests (pytest + Jest) → Integration Tests → Docker Build → Push to Registry (GitHub Container Registry or AWS ECR) → Deploy to Staging → Smoke Tests → Manual Approval Gate → Deploy to Production.
+Next.js deployments to Vercel are triggered automatically on merge to main via Vercel GitHub integration. No Docker needed for the frontend on Vercel.
+Supabase migrations are managed with supabase CLI. Migration files are committed to /supabase/migrations/. GitHub Actions runs supabase db push on merge to main using the Supabase service role key from GitHub Secrets.
+ML model artifacts are stored in MLflow Model Registry (self-hosted or Databricks). The Celery worker Docker image pulls the 'production' registered model artifact at build time using mlflow.pytorch.load_model().
+No secrets in Git. All environment variables are stored in GitHub Actions Secrets and injected at deployment time.
+5.3 Observability Stack
+Tool
+Usage
+Prometheus + Grafana
+Scrapes /metrics from FastAPI and Celery workers. Dashboards: queue depth, inference latency, engine score distributions, GPU memory, error rate.
+Sentry
+Error tracking for both Next.js (Sentry browser SDK) and FastAPI (sentry-sdk). Unhandled exceptions and Celery task failures captured automatically.
+Supabase Dashboard
+Database query performance, storage usage, Auth audit log, Realtime connection counts — all visible in the Supabase project dashboard without additional setup.
+MLflow
+Experiment tracking, model versioning, artifact registry. Every training run logged with metrics, hyperparameters, and dataset version.
+PagerDuty
+Alerts: FastAPI service down, Celery worker down, Redis unreachable, Supabase error rate > 5%, GPU OOM, analysis queue depth > 100 for > 5 minutes.
+Part 6 — Integration Test Plan & No-Conflict Checklist
+6.1 Critical Integration Test Scenarios
+These tests must pass before any release. Each exercises a boundary between two or more modules. Test doubles (mocked Supabase Storage, stubbed Neo4j) are used in CI. Full integration tests run against a staging environment with real services.
+ID
+Scenario
+Modules Tested
+Owners
+IT-01
+Analyst submits a known forged JPEG. Celery task chain completes. ForensicSubmission verdict = CONFIRMED_FORGERY. All 6 engine scores populated. Segmentation mask path is set in Supabase.
+Modules 1+2+3+5
+Lead AI Eng + ML Eng
+IT-02
+Submitter uploads a clean invoice PDF. Verdict = CLEAN. Verification certificate path is set. Certificate downloadable from /api/v1/report/{id}/certificate.
+Modules 1+3+5
+ML Eng + Backend Eng
+IT-03
+ELA channel of the 12-channel tensor shows elevated values in the region of a known edited area (amount field) of a test invoice.
+Module 3
+ML Engineer
+IT-04
+Same invoice submitted twice by the same submitter. Second submission has duplicate_status = EXACT_DUPLICATE and matched_submission_id is populated. Neo4j SIMILAR_TO relationship created.
+Modules 3+4
+ML Eng + Data Eng
+IT-05
+Invoice with sum mismatch (line items != total) has ocr_anomaly entry of type AMOUNT_MISMATCH and ocr_anomaly_score > 0.
+Module 3
+ML Engineer
+IT-06
+CONFIRMED_FORGERY verdict dispatches an alert notification within 30 seconds. Alert payload contains submission_id and link to report.
+Module 5
+Backend Engineer
+IT-07
+Analyst applies human_verdict override CONFIRMED_GENUINE on a SUSPICIOUS submission. audit_log records HUMAN_OVERRIDE event with actor_id = analyst's user_id. AI forensic_risk_score unchanged.
+Module 5
+Backend Engineer
+IT-08
+Supabase Realtime subscription on forensic_submissions receives a status update broadcast from the Celery worker within 5 seconds of task completion. Next.js UI refreshes without polling.
+Celery + Supabase + Frontend
+DevOps + Frontend Eng 1
+IT-09
+Request with an expired Supabase JWT returns HTTP 401 from the FastAPI JWT validation middleware. The Celery task is not dispatched.
+FastAPI Auth Middleware
+DevOps Engineer
+IT-10
+10 concurrent analysis submissions complete within 15 seconds each without GPU OOM errors. Celery queue depth returns to 0 within 2 minutes.
+Module 1 + Celery
+Lead AI Engineer
+6.2 No-Conflict Checklist for Engineers
+Before merging any PR, the engineer must confirm all of the following:
+I have NOT modified the ForensicSubmission Pydantic model or the forensic_submissions Supabase table schema without a PR approved by the Lead AI Engineer and a migration file committed to /supabase/migrations/.
+I have NOT changed any FastAPI endpoint URL, request body schema, or response schema without updating this PRD and notifying the dependent module's owner.
+I have NOT changed the 12-channel tensor format (channel order, normalization parameters) without updating Module 2's inference code and re-testing the U-Net segmentation output.
+I have NOT added a new Supabase table or column without adding the corresponding RLS policy and notifying the DevOps engineer.
+I have NOT modified Neo4j node labels or relationship types without updating the Module 4 spec in this PRD and notifying dependent modules.
+I have NOT hardcoded any API key, Supabase service role key, Neo4j password, or Redis URL. All credentials are in environment variables loaded via pydantic-settings.
+I HAVE added GET /health and GET /metrics endpoints to any new FastAPI service I have introduced.
+I HAVE ensured GPU-dependent inference code has a working CPU fallback (torch.device('cpu')) that logs a WARNING level message.
+I HAVE written at least one integration test for every new cross-module data flow I have introduced.
+Part 7 — Glossary
+Term
+Definition
+Celery
+A Python distributed task queue. Used to run long-running forensic analysis jobs asynchronously so that FastAPI endpoints return immediately. Broker: Redis.
+CONFIRMED_FORGERY
+The SEQUELSTRING verdict for submissions with forensic_risk_score >= 0.85. Triggers immediate alert dispatch and blocks document from approval.
+DINO ViT
+Self-DIstillation with NO labels — Vision Transformer. A Facebook AI model that analyses document image patches in a self-supervised manner to detect anomalous regions caused by tampering.
+DocTamperV1
+The training dataset used for the U-Net segmentation model. Contains real and artificially tampered document images with pixel-level ground truth masks.
+ELA (Error Level Analysis)
+A forensic technique that re-compresses an image at a known JPEG quality level. Edited regions — where someone changed content using image software — produce higher error values than surrounding unmodified areas.
+FastAPI
+The Python web framework used for all backend API endpoints. Chosen for its native async support, automatic OpenAPI documentation, and Pydantic integration.
+ForensicSubmission
+The canonical Pydantic model and Supabase PostgreSQL table that represents a single document submission and all its forensic results. The data contract for all modules.
+MLflow
+An open-source platform for ML experiment tracking and model versioning. Used to version and serve the U-Net model artifacts.
+Neo4j
+A graph database used for duplicate document cluster analysis and fraud pattern traversal. Used only where graph structure provides analytical advantage over relational queries.
+Next.js
+The React framework used for the frontend. Uses App Router with TypeScript. Deployed on Vercel.
+Noiseprint
+A forensic technique based on the fact that every scanner/camera leaves a unique invisible noise fingerprint on images. Inconsistencies in the noise pattern across a document reveal copy-pasted or digitally edited regions.
+OCR Anomaly Engine
+The 5th detection engine. Operates on PaddleOCR-extracted text. Checks for amount mismatches, duplicate reference numbers, suspicious keywords, and implausible dates.
+PaddleOCR
+The primary OCR engine used to extract text from document images. DocTR is used as fallback for image-only PDFs.
+pHash (Perceptual Hash)
+A 64-bit hash computed from the visual content of a document image. Visually similar documents produce hashes with small Hamming distances. Used for near-duplicate submission detection.
+RLS (Row-Level Security)
+A PostgreSQL / Supabase feature that enforces access control at the database row level. Used to restrict audit_log to INSERT only, and to filter forensic_submissions to the current user's submissions in the Submitter profile.
+SRM (Statistical Rich Model)
+A 30-kernel steganalysis feature extraction method. Each kernel is a high-pass filter that suppresses image content and amplifies statistical anomalies caused by digital manipulation.
+submission_id
+UUID v4 assigned to every document submission at the FastAPI route handler. Primary key throughout all modules and databases.
+Supabase
+The managed backend platform providing PostgreSQL, Auth (JWT-based SSO), Storage (S3-compatible), and Realtime (WebSocket broadcasts) for SEQUELSTRING.
+Supabase Realtime
+A WebSocket-based pub/sub system that broadcasts row-level changes from Supabase PostgreSQL to connected Next.js clients. Used for live status updates without frontend polling.
+12-Channel Tensor
+The normalized input representation of a document for the U-Net segmentation model. Channels: 3 RGB + 3 Noise Residual + 3 ELA + 3 DCT. Dimensions: (12, 512, 512). Generated by Module 3.
+U-Net
+A neural network architecture for pixel-level image segmentation. Used in SEQUELSTRING to produce per-pixel tamper probability maps. Encoder: EfficientNet-B4. Input: 12-channel tensor.
+Verdict
+The final classification of a submission: CLEAN (score < 0.40), SUSPICIOUS (0.40–0.85), or CONFIRMED_FORGERY (>= 0.85). Configurable thresholds.
+— End of SEQUELSTRING Product Requirements Document v2.0 —

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Evidence Investigation</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#0019A8",
+                        "background": "#FFFFFF",
+                        "surface": "#F4F6F8",
+                        "text": "#121212",
+                        "muted": "#737373",
+                        "border": "#E5E5E5",
+                        "red": "#EE2A24",
+                        "amber": "#FFC80A",
+                        "green": "#00823B",
+                    },
+                    fontFamily: {
+                        "display": ["Plus Jakarta Sans", "sans-serif"],
+                        "body": ["Plus Jakarta Sans", "sans-serif"]
+                    },
+                    borderRadius: {
+                        "card": "24px",
+                        "button": "32px",
+                    },
+                    boxShadow: {
+                        "subtle": "0 4px 20px rgba(0,0,0,0.04)"
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: #F4F6F8; /* surface */
+            color: #121212; /* text */
+        }
+    </style>
+</head>
+<body class="min-h-screen w-full flex bg-surface">
+<!-- Main Workspace (Split Screen Layout Simulation) -->
+<div class="flex w-full h-screen overflow-hidden">
+<!-- Left 60% Document Canvas (Placeholder for context) -->
+<div class="w-[60%] h-full bg-background relative border-r border-border hidden md:flex items-center justify-center">
+<!-- Document Preview Image -->
+<div class="w-[80%] h-[80%] bg-surface rounded-card border border-border overflow-hidden relative shadow-subtle flex items-center justify-center">
+<img alt="high resolution scan of a formal business contract with signatures and a subtle red heatmap overlay indicating suspicious pixels near the signature line" class="object-cover w-full h-full opacity-80 mix-blend-multiply" data-alt="high resolution scan of a formal business contract with signatures and a subtle red heatmap overlay indicating suspicious pixels near the signature line" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBYVjF-OZHbS5MCTf6zyB9ybqINv8mb20uhXKwdHcWZwxeLglGTZ8Mq3kjvkFRj40-aaiXTfcrBRDEZ0KYbVxiR-DE6M3gBOVvs_UVjJndMMz_DbABVk40to_92z9I1kq4GD7rlR5MaZz2pvBfx8rPB6ix6xGNZ-qLPAzYDx9Pq07VZ7oSk7_aytktuMXPRgINb9b_fSRXAH0UFzrhwR2WzabSlL1x1bOnyLhRL1LXs27uiyqVci4WRzH6zt4YGlgfBmTQP6-BX8Lw"/>
+<!-- Heatmap Overlay Simulation (Visible when toggled on) -->
+<div class="absolute inset-0 bg-gradient-to-br from-transparent via-transparent to-[rgba(238,42,36,0.3)] pointer-events-none mix-blend-multiply"></div>
+<div class="absolute bottom-1/4 right-1/4 w-32 h-16 bg-red opacity-40 blur-2xl rounded-full"></div>
+<!-- Floating Controls -->
+<div class="absolute bottom-6 left-1/2 -translate-x-1/2 h-12 bg-surface rounded-button flex items-center px-4 gap-4 shadow-subtle border border-border">
+<button aria-label="Zoom Out" class="text-text hover:text-primary transition-colors flex items-center justify-center">
+<span class="material-symbols-outlined" data-icon="remove">remove</span>
+</button>
+<span class="text-sm font-bold w-12 text-center">125%</span>
+<button aria-label="Zoom In" class="text-text hover:text-primary transition-colors flex items-center justify-center">
+<span class="material-symbols-outlined" data-icon="add">add</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Right 40% Panel (Evidence Investigation Panel) -->
+<div class="w-full md:w-[40%] h-full bg-surface flex flex-col relative shadow-[-4px_0_20px_rgba(0,0,0,0.04)] z-10 transition-transform duration-300">
+<!-- Minimal Header (Back-to-Main Exception) -->
+<header class="flex items-center px-6 py-4 bg-background border-b border-border z-20 sticky top-0">
+<button aria-label="Back to Status" class="flex items-center text-text hover:text-primary transition-colors font-bold text-base gap-2">
+<span class="material-symbols-outlined text-[24px]" data-icon="chevron_left">chevron_left</span>
+<span>Back to Status</span>
+</button>
+</header>
+<!-- Scrollable Content Area -->
+<main class="flex-1 overflow-y-auto p-6 flex flex-col gap-6">
+<!-- Title & Critical Status -->
+<div class="flex flex-col gap-2">
+<div class="flex items-center gap-3">
+<div class="w-3 h-8 bg-red rounded-sm"></div>
+<h1 class="text-[32px] font-bold leading-tight tracking-tight text-text">Pixel Tampering</h1>
+</div>
+<p class="text-muted text-base font-medium ml-6">Clone-stamp forgery detected in signature region.</p>
+</div>
+<!-- Confidence Score Block -->
+<div class="bg-background rounded-card p-6 border border-border shadow-subtle flex flex-col gap-2 relative overflow-hidden">
+<div class="absolute top-0 right-0 w-32 h-32 bg-red opacity-5 blur-3xl rounded-full -translate-y-1/2 translate-x-1/2"></div>
+<p class="text-text text-base font-bold leading-normal uppercase tracking-wider text-sm">Probability of Alteration</p>
+<p class="text-red text-[64px] font-bold leading-none tracking-tighter">98<span class="text-4xl">%</span></p>
+</div>
+<!-- Highlight Toggle -->
+<div class="bg-background rounded-card p-4 border border-border shadow-subtle flex items-center justify-between">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 bg-surface rounded-xl flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[28px]" data-icon="layers">layers</span>
+</div>
+<div class="flex flex-col">
+<span class="text-text font-bold text-base">Show Heatmap Overlay</span>
+<span class="text-muted text-sm font-medium">Isolate manipulated pixels</span>
+</div>
+</div>
+<!-- Toggle Switch -->
+<label class="relative flex h-8 w-14 cursor-pointer items-center rounded-button bg-primary p-1 shadow-inner justify-end transition-colors duration-200">
+<input checked="" class="peer sr-only" type="checkbox"/>
+<div class="h-6 w-6 rounded-full bg-background shadow-sm transition-transform duration-200"></div>
+</label>
+</div>
+<!-- Details Card -->
+<div class="bg-background rounded-card p-6 border border-border shadow-subtle flex flex-col gap-4">
+<h3 class="text-text font-bold text-lg border-b border-border pb-2">Anomaly Details</h3>
+<div class="flex flex-col gap-3">
+<div class="flex justify-between items-center py-2 border-b border-border border-dashed">
+<span class="text-muted font-medium text-sm">Coordinates</span>
+<span class="text-text font-bold text-sm font-mono bg-surface px-2 py-1 rounded">X: 1402, Y: 2891</span>
+</div>
+<div class="flex justify-between items-center py-2 border-b border-border border-dashed">
+<span class="text-muted font-medium text-sm">Affected Area</span>
+<span class="text-text font-bold text-sm">1.4 sq inches</span>
+</div>
+<div class="flex justify-between items-center py-2 border-b border-border border-dashed">
+<span class="text-muted font-medium text-sm">Layer Index</span>
+<span class="text-text font-bold text-sm">Layer 2 (Composite)</span>
+</div>
+<div class="flex justify-between items-center py-2">
+<span class="text-muted font-medium text-sm">Tool Signature</span>
+<span class="text-text font-bold text-sm flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px] text-amber" data-icon="warning">warning</span>
+                                Adobe PS CS6 Clone
+                            </span>
+</div>
+</div>
+</div>
+</main>
+</div>
+</div>
+</body></html>

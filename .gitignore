@@ -1,0 +1,44 @@
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Node / Next
+node_modules/
+.next/
+out/
+build/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Local secrets / runtime state
+.env
+.env.*
+doc-forgery-main/backend/data/db/
+forging/forging/backend/data/uploads/
+forging/forging/backend/data/outputs/
+forging/forging/backend/data/artifacts/
+forging/db_out.txt
+forging/tmp_db_query*.py
+
+# Reference / downloaded assets not needed in repo
+stitch_operational_trust_tfl_go_inspired_prd (2)/
+stitch_operational_trust_tfl_go_inspired_prd (2).zip

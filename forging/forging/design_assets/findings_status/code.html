@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Operational Trust - Findings Status</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#0019A8",
+                        "background-light": "#FFFFFF",
+                        "background-dark": "#121212",
+                        "surface": "#F4F6F8",
+                        "text-main": "#121212",
+                        "muted": "#737373",
+                        "border-color": "#E5E5E5",
+                        "accent-red": "#EE2A24",
+                        "accent-amber": "#FFC80A",
+                        "accent-green": "#00823B",
+                    },
+                    fontFamily: {
+                        "display": ["Plus Jakarta Sans", "sans-serif"],
+                        "sans": ["Plus Jakarta Sans", "sans-serif"]
+                    },
+                    borderRadius: {
+                        "DEFAULT": "1rem",
+                        "lg": "1.5rem", // 24px
+                        "xl": "2rem", // 32px
+                        "full": "9999px"
+                    },
+                    boxShadow: {
+                        "subtle": "0 4px 20px rgba(0,0,0,0.04)"
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: theme('colors.background-light');
+            color: theme('colors.text-main');
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col bg-background-light">
+<!-- TopNavBar (Shared Component) - Included because this is a top-level destination screen (Overview of findings) -->
+<div class="relative flex h-auto w-full flex-col bg-surface group/design-root overflow-x-hidden border-b border-border-color">
+<div class="layout-container flex h-full grow flex-col">
+<div class="px-40 flex flex-1 justify-center py-0">
+<div class="layout-content-container flex flex-col w-full flex-1">
+<header class="flex items-center justify-between whitespace-nowrap px-10 py-4 bg-primary text-white">
+<div class="flex items-center gap-4">
+<div class="size-6 text-white" data-icon="shield" data-size="24px" data-weight="fill">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1; font-size: 24px;">shield</span>
+</div>
+<h2 class="text-white text-xl font-bold leading-tight tracking-tight">Operational Trust</h2>
+</div>
+<div class="flex flex-1 justify-end gap-6 items-center">
+<div class="relative w-64">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-muted" style="font-size: 20px;">search</span>
+<input class="w-full bg-white/10 border border-white/20 text-white placeholder-white/50 rounded-full py-2 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-white/50 text-sm font-medium" placeholder="Search Case ID..." type="text"/>
+</div>
+<div class="bg-center bg-no-repeat aspect-square bg-cover rounded-full size-10 border-2 border-white/20" data-alt="minimal geometric avatar placeholder" style='background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuAfm8zmBKfZJ_Zqg79S0n1kbEB686MlNOiUs8kRnRSK6IsWPzS6x2vHD2uT9XyhDXyHzUk_RBdx3ZimqvBbLQLBl5gGjePJAj7xsX8PKa4jzW1tVcHYj-arW1XYmMfn41PGvN3PdNnvt2E1K1QEXuMUFpbuco3qj6VsPRBPmZUh7l0-S2FfTzAoYwTqbGA-GJLAOLBuTx23yIHNMnLi8rj0QiCmjpnnadP2TdMd2_IZ8P2uI1yUsxLmXEgH1OceCX3bNavd9FsaW7k");'></div>
+</div>
+</header>
+</div>
+</div>
+</div>
+</div>
+<!-- Main Workspace: Split Screen -->
+<main class="flex-1 flex overflow-hidden">
+<!-- Left Pane: Document Canvas (60%) -->
+<div class="w-[60%] bg-background-light relative flex items-center justify-center p-8 border-r border-border-color">
+<!-- Floating Zoom Controls -->
+<div class="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-surface px-4 py-2 rounded-xl shadow-subtle border border-border-color z-10">
+<button class="p-2 text-text-main hover:bg-border-color rounded-lg transition-colors flex items-center justify-center">
+<span class="material-symbols-outlined" style="font-size: 20px;">remove</span>
+</button>
+<span class="text-sm font-bold w-12 text-center">100%</span>
+<button class="p-2 text-text-main hover:bg-border-color rounded-lg transition-colors flex items-center justify-center">
+<span class="material-symbols-outlined" style="font-size: 20px;">add</span>
+</button>
+<div class="w-px h-6 bg-border-color mx-2"></div>
+<button class="p-2 text-text-main hover:bg-border-color rounded-lg transition-colors flex items-center justify-center">
+<span class="material-symbols-outlined" style="font-size: 20px;">fit_screen</span>
+</button>
+</div>
+<!-- Document Preview Placeholder -->
+<div class="w-full max-w-2xl aspect-[1/1.4] bg-white shadow-xl border border-border-color rounded-sm relative overflow-hidden" data-alt="Scanned passport document with slight rotation, showing MRZ zone and photo, highlighted red box around the photo area indicating potential tampering">
+<div class="absolute inset-0 bg-cover bg-center opacity-90" data-alt="Scanned official document with seals and signatures" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuD-fhP6eGuaqQO_twtRATRzBmmMa5qdIpZkd9e43YOI70bvShw33C5yLKZ6CwMhZjqa8cmnH1HBaeVe-dFnmZwyqfp0Cl44klpAlnyPJyNS5bhez6Tdrji2mYbGvafyRIDBUwdOzBqB5-Pupen8-igye91Cq0Q_Iwn2N3Pw8txC86TNQl5dCUuH64CCh0-MyDmKACpKnY_jAb01RLvZQwC06pig-XARqqsWY1j7mYFXQ8q79w4g6S0uL0hhVXY7F3rcIMcXoOh6wSo');"></div>
+<!-- Heatmap Overlay Simulation (Pixel Tampering) -->
+<div class="absolute top-[20%] left-[10%] w-[30%] h-[30%] border-2 border-accent-red bg-accent-red/20 flex items-start p-2">
+<span class="bg-accent-red text-white text-xs font-bold px-2 py-1 rounded-sm">Tampering Detected</span>
+</div>
+</div>
+</div>
+<!-- Right Pane: Analysis Panel (40%) -->
+<div class="w-[40%] bg-surface flex flex-col h-full shadow-subtle z-20">
+<!-- Context Header -->
+<div class="px-8 pt-8 pb-4">
+<p class="text-muted text-sm font-medium mb-1 uppercase tracking-wider">Case ID: DOC-882-9A</p>
+<h1 class="text-text-main text-3xl font-bold tracking-tight">Passport_Scan_v2.pdf</h1>
+</div>
+<!-- Tabs -->
+<div class="flex border-b border-border-color px-8 gap-8">
+<a class="flex flex-col items-center justify-center border-b-[4px] border-b-primary text-text-main pb-3 pt-4" href="#">
+<p class="text-sm font-bold leading-normal">Status</p>
+</a>
+<a class="flex flex-col items-center justify-center border-b-[4px] border-b-transparent text-muted hover:text-text-main transition-colors pb-3 pt-4" href="#">
+<p class="text-sm font-bold leading-normal">Evidence</p>
+</a>
+<a class="flex flex-col items-center justify-center border-b-[4px] border-b-transparent text-muted hover:text-text-main transition-colors pb-3 pt-4" href="#">
+<p class="text-sm font-bold leading-normal">Diagnostics</p>
+</a>
+<a class="flex flex-col items-center justify-center border-b-[4px] border-b-transparent text-muted hover:text-text-main transition-colors pb-3 pt-4" href="#">
+<p class="text-sm font-bold leading-normal">Timeline</p>
+</a>
+</div>
+<!-- Scrollable Content: Findings Status -->
+<div class="flex-1 overflow-y-auto p-8 space-y-4">
+<div class="flex items-center justify-between mb-6">
+<h2 class="text-xl font-bold text-text-main">Integrity Checks</h2>
+<span class="bg-accent-red/10 text-accent-red px-3 py-1 rounded-full text-sm font-bold">1 Critical</span>
+</div>
+<!-- Status Row: Critical (Red) -->
+<button class="w-full flex items-stretch h-16 bg-white rounded-lg overflow-hidden border border-border-color shadow-sm hover:shadow-md transition-shadow group text-left cursor-pointer">
+<div class="w-2 bg-accent-red shrink-0"></div>
+<div class="flex-1 flex items-center justify-between px-6">
+<div class="flex flex-col">
+<span class="text-lg font-bold text-text-main group-hover:text-primary transition-colors">Pixel Tampering</span>
+<span class="text-sm font-medium text-accent-red">Tampering Detected</span>
+</div>
+<span class="material-symbols-outlined text-muted group-hover:text-primary transition-colors">chevron_right</span>
+</div>
+</button>
+<!-- Status Row: Warning (Amber) -->
+<button class="w-full flex items-stretch h-16 bg-white rounded-lg overflow-hidden border border-border-color shadow-sm hover:shadow-md transition-shadow group text-left cursor-pointer">
+<div class="w-2 bg-accent-amber shrink-0"></div>
+<div class="flex-1 flex items-center justify-between px-6">
+<div class="flex flex-col">
+<span class="text-lg font-bold text-text-main group-hover:text-primary transition-colors">Metadata Integrity</span>
+<span class="text-sm font-medium text-accent-amber">Minor Anomalies</span>
+</div>
+<span class="material-symbols-outlined text-muted group-hover:text-primary transition-colors">chevron_right</span>
+</div>
+</button>
+<!-- Status Row: Good (Green) -->
+<button class="w-full flex items-stretch h-16 bg-white rounded-lg overflow-hidden border border-border-color shadow-sm hover:shadow-md transition-shadow group text-left cursor-pointer">
+<div class="w-2 bg-accent-green shrink-0"></div>
+<div class="flex-1 flex items-center justify-between px-6">
+<div class="flex flex-col">
+<span class="text-lg font-bold text-text-main group-hover:text-primary transition-colors">EXIF Data Match</span>
+<span class="text-sm font-medium text-muted">Clear</span>
+</div>
+<span class="material-symbols-outlined text-muted group-hover:text-primary transition-colors">chevron_right</span>
+</div>
+</button>
+<!-- Status Row: Good (Green) -->
+<button class="w-full flex items-stretch h-16 bg-white rounded-lg overflow-hidden border border-border-color shadow-sm hover:shadow-md transition-shadow group text-left cursor-pointer">
+<div class="w-2 bg-accent-green shrink-0"></div>
+<div class="flex-1 flex items-center justify-between px-6">
+<div class="flex flex-col">
+<span class="text-lg font-bold text-text-main group-hover:text-primary transition-colors">Format Consistency</span>
+<span class="text-sm font-medium text-muted">Clear</span>
+</div>
+<span class="material-symbols-outlined text-muted group-hover:text-primary transition-colors">chevron_right</span>
+</div>
+</button>
+<!-- Status Row: Good (Green) -->
+<button class="w-full flex items-stretch h-16 bg-white rounded-lg overflow-hidden border border-border-color shadow-sm hover:shadow-md transition-shadow group text-left cursor-pointer">
+<div class="w-2 bg-accent-green shrink-0"></div>
+<div class="flex-1 flex items-center justify-between px-6">
+<div class="flex flex-col">
+<span class="text-lg font-bold text-text-main group-hover:text-primary transition-colors">Digital Signatures</span>
+<span class="text-sm font-medium text-muted">Verified</span>
+</div>
+<span class="material-symbols-outlined text-muted group-hover:text-primary transition-colors">chevron_right</span>
+</div>
+</button>
+</div>
+<!-- Bottom Action Area -->
+<div class="p-8 border-t border-border-color bg-surface">
+<button class="w-full bg-primary text-white font-bold h-14 rounded-xl hover:bg-primary/90 transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined">summarize</span>
+                    Generate Report
+                </button>
+</div>
+</div>
+</main>
+</body></html>
