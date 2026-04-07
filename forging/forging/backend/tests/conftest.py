@@ -316,7 +316,14 @@ class FakeOCRService:
     def __init__(self, _settings: Settings) -> None:
         self.backend_name = "fakeocr"
 
-    def analyze_document(self, pages: list[Image.Image]):  # noqa: ANN201
+    def analyze_document(  # noqa: ANN201
+        self,
+        pages: list[Image.Image],
+        document_type: str | None = None,
+        page_texts_override: list[str] | None = None,
+        backend_name_override: str | None = None,
+    ):
+        page_texts = page_texts_override or ["integration test" for _ in pages]
         return type(
             "OCRResult",
             (),
@@ -330,8 +337,8 @@ class FakeOCRService:
                 ],
                 "score": 0.2,
                 "warnings": [],
-                "page_texts": ["integration test"],
-                "backend_name": self.backend_name,
+                "page_texts": page_texts,
+                "backend_name": backend_name_override or self.backend_name,
             },
         )()
 

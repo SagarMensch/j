@@ -55,7 +55,7 @@ export function DiagnosticsScreen({
                         </defs>
                       </svg>
                     </div>
-                    <h2 className="text-lg font-bold leading-tight tracking-[-0.015em]">Operational Trust</h2>
+                    <h2 className="text-lg font-bold leading-tight tracking-[-0.015em]">SequelForensics</h2>
                   </div>
                   <label className="flex min-w-40 max-w-64 flex-col">
                     <div className="flex h-10 w-full items-stretch rounded-full bg-surface">

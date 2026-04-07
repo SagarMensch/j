@@ -373,7 +373,7 @@ export default function SunflowerHero() {
         }}
       />
 
-      <div className="pointer-events-none absolute left-[calc(50%+40px)] top-1/2 h-[122vh] w-[122vw] min-h-[860px] min-w-[860px] -translate-x-1/2 -translate-y-1/2 sm:left-[calc(50%+52px)] sm:h-[128vh] sm:w-[128vw] lg:left-[calc(50%+64px)] lg:h-[138vh] lg:w-[138vw]">
+      <div className="pointer-events-none absolute left-[calc(50%+128px)] top-[calc(50%+44px)] h-[122vh] w-[122vw] min-h-[860px] min-w-[860px] -translate-x-1/2 -translate-y-1/2 sm:left-[calc(50%+148px)] sm:top-[calc(50%+48px)] sm:h-[128vh] sm:w-[128vw] lg:left-[calc(50%+176px)] lg:top-[calc(50%+56px)] lg:h-[138vh] lg:w-[138vw]">
         <Canvas dpr={[1, 2]} gl={{ alpha: true, antialias: true }}>
           <BlueprintField pointerRef={pointerRef} />
         </Canvas>

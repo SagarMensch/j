@@ -10,6 +10,7 @@ from app.api.routes_artifacts import router as artifacts_router
 from app.api.routes_dashboard import router as dashboard_router
 from app.api.routes_health import router as health_router
 from app.api.routes_model import router as model_router
+from app.api.routes_precheck import router as precheck_router
 from app.api.routes_analyst import router as analyst_router
 from app.api.routes_compliance import router as compliance_router
 from app.api.routes_devops import router as devops_router
@@ -17,10 +18,12 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.core.model_loader import ModelLoader
 from app.services.artifact_service import ArtifactService
+from app.services.document_routing_service import DocumentRoutingService
 from app.services.duplicate_service import DuplicateService
 from app.services.engine_service import EngineService
 from app.services.ocr_service import OCRService
 from app.services.pdf_service import PDFService
+from app.services.precheck_service import PrecheckService
 from app.services.preprocess_service import PreprocessService
 from app.services.report_service import ReportService
 from app.services.segmentation_service import SegmentationService
@@ -37,8 +40,10 @@ def create_app() -> FastAPI:
     model_loader.load()
 
     pdf_service = PDFService(settings)
+    precheck_service = PrecheckService(settings, pdf_service)
     preprocess_service = PreprocessService(settings)
     engine_service = EngineService(settings)
+    document_routing_service = DocumentRoutingService(settings)
     ocr_service = OCRService(settings)
     duplicate_service = DuplicateService(settings, storage_service)
     segmentation_service = SegmentationService(settings, model_loader, artifact_service)
@@ -50,6 +55,7 @@ def create_app() -> FastAPI:
         pdf_service=pdf_service,
         preprocess_service=preprocess_service,
         engine_service=engine_service,
+        document_routing_service=document_routing_service,
         ocr_service=ocr_service,
         duplicate_service=duplicate_service,
         segmentation_service=segmentation_service,
@@ -67,10 +73,12 @@ def create_app() -> FastAPI:
     app.state.settings = settings
     app.state.storage_service = storage_service
     app.state.model_loader = model_loader
+    app.state.precheck_service = precheck_service
     app.state.report_service = report_service
 
     app.include_router(health_router, prefix=settings.api_v1_prefix)
     app.include_router(model_router, prefix=settings.api_v1_prefix)
+    app.include_router(precheck_router, prefix=settings.api_v1_prefix)
     app.include_router(analysis_router, prefix=settings.api_v1_prefix)
     app.include_router(dashboard_router, prefix=settings.api_v1_prefix)
     app.include_router(artifacts_router, prefix=settings.api_v1_prefix)

@@ -52,6 +52,26 @@ def test_upload_analysis_persistence_and_artifacts_round_trip(
     assert upload_path.exists()
 
 
+def test_precheck_endpoint_returns_quality_gate_payload(
+    test_client,
+    settings,
+    sample_image_bytes: bytes,
+) -> None:
+    response = test_client.post(
+        f"{settings.api_v1_prefix}/precheck",
+        files={"file": ("sample.png", sample_image_bytes, "image/png")},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["filename"] == "sample.png"
+    assert payload["page_count"] == 1
+    assert payload["crc32_hash"]
+    assert payload["overall_status"] in {"PASS", "WARN", "BLOCK"}
+    assert payload["checks"]
+    assert payload["pages"]
+    assert payload["pages"][0]["checks"]
+
+
 def test_model_info_includes_serving_metadata(test_client, settings) -> None:
     response = test_client.get(f"{settings.api_v1_prefix}/model/info")
     assert response.status_code == 200
@@ -60,4 +80,3 @@ def test_model_info_includes_serving_metadata(test_client, settings) -> None:
     assert payload["checkpoint_sha256"] == "test-checkpoint"
     assert payload["calibration_loaded"] is False
     assert payload["calibration_profile_path"] == str(settings.calibration_profile_path)
-

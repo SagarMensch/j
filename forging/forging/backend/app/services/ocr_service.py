@@ -45,12 +45,22 @@ class OCRService:
                 self.backend_name = None
                 return None
 
-    def analyze_document(self, pages: list[Image.Image]) -> OCRAnalysisResult:
+    def analyze_document(
+        self,
+        pages: list[Image.Image],
+        document_type: str | None = None,
+        page_texts_override: list[str] | None = None,
+        backend_name_override: str | None = None,
+    ) -> OCRAnalysisResult:
         warnings: list[str] = []
         anomalies: list[dict[str, object]] = []
         page_texts: list[str] = []
+        backend_name = backend_name_override or self.backend_name
+        normalized_document_type = self._normalise_document_type(document_type)
 
-        if self.reader is None or self.backend_name is None:
+        if page_texts_override is not None:
+            page_texts = [text or "" for text in page_texts_override]
+        elif self.reader is None or self.backend_name is None:
             warning = "OCR backend unavailable; OCR anomaly score set to 0.0."
             warnings.append(warning)
             anomalies.append(
@@ -68,13 +78,13 @@ class OCRService:
                 backend_name=None,
             )
 
-        for page_number, page in enumerate(pages, start=1):
-            try:
-                page_texts.append(self._extract_page_text(page))
-            except Exception as exc:
-                warning = f"OCR extraction failed on page {page_number}: {exc}"
-                warnings.append(warning)
-                page_texts.append("")
+            for page_number, page in enumerate(pages, start=1):
+                try:
+                    page_texts.append(self._extract_page_text(page))
+                except Exception as exc:
+                    warning = f"OCR extraction failed on page {page_number}: {exc}"
+                    warnings.append(warning)
+                    page_texts.append("")
 
         if not any(text.strip() for text in page_texts):
             warning = "OCR produced no text; OCR anomaly score set to 0.0."
@@ -91,10 +101,11 @@ class OCRService:
                 score=0.0,
                 warnings=warnings,
                 page_texts=page_texts,
-                backend_name=self.backend_name,
+                backend_name=backend_name,
             )
 
-        anomalies.extend(self._detect_amount_mismatch(page_texts))
+        if normalized_document_type in {"invoice", "receipt", "payslip", "other"}:
+            anomalies.extend(self._detect_amount_mismatch(page_texts))
         anomalies.extend(self._detect_duplicate_references(page_texts))
         anomalies.extend(self._detect_suspicious_keywords(page_texts))
         anomalies.extend(self._detect_invalid_dates(page_texts))
@@ -105,7 +116,7 @@ class OCRService:
             score=score,
             warnings=warnings,
             page_texts=page_texts,
-            backend_name=self.backend_name,
+            backend_name=backend_name,
         )
 
     def _extract_page_text(self, image: Image.Image) -> str:
@@ -276,3 +287,9 @@ class OCRService:
         }
         score = sum(weights.get(anomaly["type"], 0.0) for anomaly in anomalies)
         return clamp01(score)
+
+    @staticmethod
+    def _normalise_document_type(value: str | None) -> str:
+        if not value:
+            return "other"
+        return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_") or "other"

@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { fetchAnalyses } from "@/lib/api";
 import {
+  formatDocumentType,
   formatDateTime,
   formatMs,
   formatPercent,
+  formatProvider,
   formatVerdict,
   verdictTone,
 } from "@/lib/format";
@@ -28,7 +30,7 @@ export default async function SubmitterMySubmissionsPage() {
               Submission Casebook
             </h1>
             <p className="mt-2 max-w-2xl text-sm font-medium text-muted">
-              Review the latest uploaded documents, their verdicts, and processing results.
+              Review your uploaded documents and their latest review results.
             </p>
           </div>
           <Link
@@ -52,7 +54,7 @@ export default async function SubmitterMySubmissionsPage() {
               </h2>
             </div>
             <span className="text-sm font-medium text-muted">
-              {history.total} total analyses
+              {history.total} total submissions
             </span>
           </div>
 
@@ -88,6 +90,9 @@ export default async function SubmitterMySubmissionsPage() {
                         <p className="mt-2 text-xs font-medium uppercase tracking-[0.18em] text-muted">
                           {item.analysis_id}
                         </p>
+                        <p className="mt-2 text-xs font-bold uppercase tracking-[0.16em] text-primary">
+                          {formatDocumentType(item.document_type)} | {formatProvider(item.document_provider)}
+                        </p>
                       </div>
 
                       <div className="flex flex-wrap gap-3">
@@ -97,7 +102,7 @@ export default async function SubmitterMySubmissionsPage() {
                           {formatVerdict(item.verdict)}
                         </span>
                         <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-text-main">
-                          {formatPercent(item.forensic_risk_score)} risk
+                          {formatPercent(item.forensic_risk_score)} risk level
                         </span>
                       </div>
                     </div>
@@ -113,7 +118,7 @@ export default async function SubmitterMySubmissionsPage() {
                       </div>
                       <div>
                         <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-muted">
-                          Regions
+                          Marked Areas
                         </p>
                         <p className="mt-1 text-sm font-bold text-text-main">
                           {item.tampered_region_count}
@@ -121,7 +126,7 @@ export default async function SubmitterMySubmissionsPage() {
                       </div>
                       <div>
                         <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-muted">
-                          OCR Flags
+                          Text Issues
                         </p>
                         <p className="mt-1 text-sm font-bold text-text-main">
                           {item.ocr_anomaly_count}
@@ -129,7 +134,7 @@ export default async function SubmitterMySubmissionsPage() {
                       </div>
                       <div>
                         <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-muted">
-                          Runtime
+                          Review Time
                         </p>
                         <p className="mt-1 text-sm font-bold text-text-main">
                           {formatMs(item.processing_time_ms)}

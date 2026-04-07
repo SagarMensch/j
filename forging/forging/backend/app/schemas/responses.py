@@ -26,6 +26,12 @@ class OCRAnomalyType(str, Enum):
     OCR_WARNING = "OCR_WARNING"
 
 
+class PrecheckStatus(str, Enum):
+    PASS = "PASS"
+    WARN = "WARN"
+    BLOCK = "BLOCK"
+
+
 class EngineScores(BaseModel):
     ela_score: float = Field(ge=0.0, le=1.0)
     srm_score: float = Field(ge=0.0, le=1.0)
@@ -104,6 +110,13 @@ class ForensicLayer(BaseModel):
     layer_name: str
     confidence_score: float = Field(ge=0.0, le=1.0)
     processing_ms: int = Field(ge=0)
+
+
+class DocumentRoutingInfo(BaseModel):
+    provider: str
+    source: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    language_code: str
 
 
 class AnalystReview(BaseModel):
@@ -199,6 +212,36 @@ class MonitoringWarningEvent(BaseModel):
     created_at: datetime
 
 
+class PrecheckCheckResult(BaseModel):
+    key: str
+    label: str
+    status: PrecheckStatus
+    message: str
+    value: str | None = None
+    page_index: int | None = Field(default=None, ge=1)
+
+
+class PrecheckPageResult(BaseModel):
+    page_index: int = Field(ge=1)
+    width: int = Field(ge=1)
+    height: int = Field(ge=1)
+    status: PrecheckStatus
+    checks: list[PrecheckCheckResult] = Field(default_factory=list)
+
+
+class PrecheckResponse(BaseModel):
+    filename: str
+    page_count: int = Field(ge=1)
+    overall_status: PrecheckStatus
+    can_proceed: bool
+    blocking_check_count: int = Field(ge=0)
+    warning_check_count: int = Field(ge=0)
+    crc32_hash: str
+    summary: str
+    checks: list[PrecheckCheckResult] = Field(default_factory=list)
+    pages: list[PrecheckPageResult] = Field(default_factory=list)
+
+
 class DevOpsMonitoringSummaryResponse(BaseModel):
     total_analyses: int = Field(ge=0)
     analyses_with_warnings: int = Field(ge=0)
@@ -220,6 +263,7 @@ class AnalysisResponse(BaseModel):
     analysis_id: str
     filename: str
     document_type: str | None = None
+    document_routing: DocumentRoutingInfo | None = None
     submitter_id: str | None = None
     tenant_id: str | None = None
     session_ip_address: str | None = None
@@ -247,6 +291,9 @@ class AnalysisHistoryItem(BaseModel):
     analysis_id: str
     filename: str
     document_type: str | None = None
+    document_provider: str | None = None
+    document_source: str | None = None
+    document_language_code: str | None = None
     submitter_id: str | None = None
     tenant_id: str | None = None
     session_geolocation: str | None = None

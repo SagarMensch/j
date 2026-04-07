@@ -202,6 +202,15 @@ class Settings(BaseModel):
     dino_model_name: str = "vit_small_patch16_224"
     min_region_area_px: int = 64
     calibration_profile: CalibrationProfile | None = None
+    document_router_provider: Literal["auto", "nemotron", "sarvam"] = "auto"
+    document_router_timeout_seconds: float = 45.0
+    openrouter_api_key: str | None = None
+    openrouter_model: str = "nvidia/nemotron-nano-12b-v2-vl:free"
+    openrouter_base_url: str = "https://openrouter.ai/api/v1/chat/completions"
+    sarvam_api_key: str | None = None
+    sarvam_base_url: str = "https://api.sarvam.ai"
+    sarvam_poll_interval_seconds: float = 2.0
+    sarvam_poll_timeout_seconds: float = 90.0
 
     @property
     def backend_root(self) -> Path:
@@ -284,6 +293,21 @@ def build_settings() -> Settings:
         dino_model_name=_env_str("DINO_MODEL_NAME", "vit_small_patch16_224"),
         min_region_area_px=_env_int("MIN_REGION_AREA_PX", 64),
         calibration_profile=loaded_calibration,
+        document_router_provider=_env_str("DOCUMENT_ROUTER_PROVIDER", "auto"),
+        document_router_timeout_seconds=_env_float("DOCUMENT_ROUTER_TIMEOUT_SECONDS", 45.0),
+        openrouter_api_key=os.getenv("OPENROUTER_API_KEY"),
+        openrouter_model=_env_str(
+            "OPENROUTER_MODEL",
+            "nvidia/nemotron-nano-12b-v2-vl:free",
+        ),
+        openrouter_base_url=_env_str(
+            "OPENROUTER_BASE_URL",
+            "https://openrouter.ai/api/v1/chat/completions",
+        ),
+        sarvam_api_key=os.getenv("SARVAM_API_KEY"),
+        sarvam_base_url=_env_str("SARVAM_BASE_URL", "https://api.sarvam.ai"),
+        sarvam_poll_interval_seconds=_env_float("SARVAM_POLL_INTERVAL_SECONDS", 2.0),
+        sarvam_poll_timeout_seconds=_env_float("SARVAM_POLL_TIMEOUT_SECONDS", 90.0),
     )
 
 

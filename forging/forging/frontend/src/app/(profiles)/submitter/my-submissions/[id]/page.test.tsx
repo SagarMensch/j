@@ -91,8 +91,8 @@ describe("SubmitterSubmissionDetailPage", () => {
 
     expect(screen.getByText("invoice.png")).toBeInTheDocument();
     expect(screen.getByText(/91%/i)).toBeInTheDocument();
-    const tamperedRegionsCard = screen.getByText("Tampered Regions").parentElement;
-    expect(tamperedRegionsCard).not.toBeNull();
-    expect(tamperedRegionsCard).toHaveTextContent("1");
+    const markedAreasCard = screen.getByText("Marked Areas").parentElement;
+    expect(markedAreasCard).not.toBeNull();
+    expect(markedAreasCard).toHaveTextContent("1");
   });
 });

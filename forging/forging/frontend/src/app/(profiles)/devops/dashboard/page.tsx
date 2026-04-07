@@ -28,7 +28,7 @@ export default async function DevopsDashboardPage() {
           DevOps
         </p>
         <h1 className="mt-2 text-3xl font-bold tracking-tight">
-          Backend system health
+          System health
         </h1>
       </header>
 
@@ -135,7 +135,7 @@ export default async function DevopsDashboardPage() {
         <aside className="space-y-4">
           <div className="rounded-[28px] border border-border-color bg-white p-6 shadow-subtle">
             <h2 className="text-2xl font-bold tracking-tight">
-              Runtime Monitoring
+              Runtime Overview
             </h2>
             <div className="mt-6 grid gap-3">
               {[
@@ -159,11 +159,11 @@ export default async function DevopsDashboardPage() {
 
           <div className="rounded-[28px] border border-border-color bg-white p-6 shadow-subtle">
           <h2 className="text-2xl font-bold tracking-tight">
-            Engine Latency & Telemetry
+            Service Activity
           </h2>
           <div className="mt-6 space-y-3">
             {telemetry.length === 0 ? (
-              <p className="text-sm text-muted text-center py-10">No execution telemetry recorded.</p>
+              <p className="text-sm text-muted text-center py-10">No recent activity recorded.</p>
             ) : (
               telemetry.map((layer) => (
                 <div
@@ -172,13 +172,13 @@ export default async function DevopsDashboardPage() {
                 >
                   <div className="flex flex-col">
                     <span className="text-sm font-bold uppercase tracking-widest">{layer.layer_name.replace(/_/g, " ")}</span>
-                    <span className="text-xs font-medium text-muted mt-1">{layer.execution_count} inferences</span>
+                    <span className="text-xs font-medium text-muted mt-1">{layer.execution_count} runs</span>
                   </div>
                   <div className="flex flex-col items-end">
                     <span className="text-sm font-bold tracking-widest text-[#0019a8]">
                       {Math.round(layer.avg_processing_ms)}ms
                     </span>
-                    <span className="text-xs font-medium text-muted mt-1">{formatPercent(layer.avg_confidence_score)} conf</span>
+                    <span className="text-xs font-medium text-muted mt-1">{formatPercent(layer.avg_confidence_score)} avg.</span>
                   </div>
                 </div>
               ))
@@ -193,7 +193,7 @@ export default async function DevopsDashboardPage() {
             <div className="mt-6 space-y-3">
               {(monitoring?.recent_warning_events ?? []).length === 0 ? (
                 <p className="py-8 text-center text-sm text-muted">
-                  No recent pipeline warnings recorded.
+                  No recent system notes recorded.
                 </p>
               ) : (
                 monitoring?.recent_warning_events.map((event) => (

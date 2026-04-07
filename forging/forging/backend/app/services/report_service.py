@@ -20,6 +20,7 @@ from app.schemas.responses import (
     AnalysisHistoryResponse,
     AnalysisResponse,
     DeleteAnalysisResponse,
+    DocumentRoutingInfo,
     DuplicateCheck,
     DuplicateStatus,
     EngineScores,
@@ -29,6 +30,10 @@ from app.schemas.responses import (
     TamperedRegion,
 )
 from app.services.artifact_service import ArtifactService
+from app.services.document_routing_service import (
+    DocumentRoutingDecision,
+    DocumentRoutingService,
+)
 from app.services.duplicate_service import DuplicateService
 from app.services.engine_service import EngineService
 from app.services.ocr_service import OCRAnalysisResult, OCRService
@@ -50,6 +55,7 @@ class ReportService:
         pdf_service: PDFService,
         preprocess_service: PreprocessService,
         engine_service: EngineService,
+        document_routing_service: DocumentRoutingService,
         ocr_service: OCRService,
         duplicate_service: DuplicateService,
         segmentation_service: SegmentationService,
@@ -61,6 +67,7 @@ class ReportService:
         self.pdf_service = pdf_service
         self.preprocess_service = preprocess_service
         self.engine_service = engine_service
+        self.document_routing_service = document_routing_service
         self.ocr_service = ocr_service
         self.duplicate_service = duplicate_service
         self.segmentation_service = segmentation_service
@@ -103,6 +110,14 @@ class ReportService:
             extra={"analysis_id": analysis_id, "page_count": len(rendered_pages)},
         )
 
+        document_routing = self.document_routing_service.inspect_document(
+            upload_path=upload_path,
+            filename=filename,
+            rendered_pages=rendered_pages,
+            requested_document_type=document_type,
+        )
+        resolved_document_type = document_routing.document_type
+
         duplicate_started = time.perf_counter()
         duplicate_result = self.duplicate_service.check_document(
             payload=payload,
@@ -111,7 +126,12 @@ class ReportService:
         duplicate_ms = int((time.perf_counter() - duplicate_started) * 1000)
 
         ocr_started = time.perf_counter()
-        ocr_result = self.ocr_service.analyze_document([page.image for page in rendered_pages])
+        ocr_result = self.ocr_service.analyze_document(
+            [page.image for page in rendered_pages],
+            document_type=resolved_document_type,
+            page_texts_override=document_routing.page_texts,
+            backend_name_override=document_routing.ocr_backend_name,
+        )
         ocr_ms = int((time.perf_counter() - ocr_started) * 1000)
 
         page_scores = {
@@ -131,7 +151,9 @@ class ReportService:
             self._segmentation_layer_name(): 0,
         }
         page_results: list[PageResult] = []
-        warnings = self._dedupe_warnings(duplicate_result.warnings + ocr_result.warnings)
+        warnings = self._dedupe_warnings(
+            duplicate_result.warnings + document_routing.warnings + ocr_result.warnings
+        )
 
         for rendered_page in rendered_pages:
             page_index = rendered_page.page_index
@@ -248,7 +270,13 @@ class ReportService:
         response = AnalysisResponse(
             analysis_id=analysis_id,
             filename=filename,
-            document_type=document_type,
+            document_type=resolved_document_type,
+            document_routing=DocumentRoutingInfo(
+                provider=document_routing.provider,
+                source=document_routing.source,
+                confidence=document_routing.confidence,
+                language_code=document_routing.language_code,
+            ),
             submitter_id=submitter_id,
             tenant_id=tenant_id,
             session_ip_address=session_ip_address,
@@ -267,6 +295,7 @@ class ReportService:
                 rendered_pages=rendered_pages,
                 render_ms=render_ms,
                 ocr_result=ocr_result,
+                document_routing=document_routing,
             ),
             device_fingerprint=self._build_device_fingerprint(
                 user_agent=user_agent,
@@ -355,6 +384,7 @@ class ReportService:
         rendered_pages: list[RenderedPage],
         render_ms: int,
         ocr_result: OCRAnalysisResult,
+        document_routing: DocumentRoutingDecision,
     ) -> list[dict[str, Any]]:
         guessed_mime = mimetypes.guess_type(upload_path.name)[0]
         mime_type = upload_file.content_type or guessed_mime or "application/octet-stream"
@@ -415,6 +445,10 @@ class ReportService:
                     "checkpoint_input_channels": self.model_loader.checkpoint_input_channels,
                     "loaded_input_channels": self.model_loader.input_channels,
                     "dino_model": self.settings.dino_model_name,
+                    "document_type_source": document_routing.source,
+                    "document_type_confidence": document_routing.confidence,
+                    "document_provider": document_routing.provider,
+                    "document_language_code": document_routing.language_code,
                     "checkpoint_sha256": self.model_loader.checkpoint_sha256,
                     "calibration_loaded": self.settings.calibration_profile is not None,
                     "calibration_generated_at": self.settings.calibration_profile.generated_at.isoformat()

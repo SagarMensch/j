@@ -4,6 +4,29 @@ export function formatVerdict(verdict: Verdict) {
   return verdict.replaceAll("_", " ");
 }
 
+export function formatDocumentType(value: string | null | undefined) {
+  if (!value) {
+    return "Unspecified";
+  }
+  return value.replaceAll("_", " ");
+}
+
+export function formatProvider(value: string | null | undefined) {
+  if (!value) {
+    return "Local";
+  }
+  if (value === "sarvam") {
+    return "Sarvam";
+  }
+  if (value === "nemotron") {
+    return "Nemotron";
+  }
+  if (value === "local") {
+    return "Local";
+  }
+  return value.replaceAll("_", " ");
+}
+
 export function verdictTone(verdict: Verdict) {
   switch (verdict) {
     case "CONFIRMED_FORGERY":

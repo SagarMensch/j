@@ -53,8 +53,8 @@ export default function LoginPage() {
         }}
       />
 
-      <div className="relative z-10 mx-auto flex h-full w-full max-w-[1680px] flex-col px-5 py-5 md:px-8 md:py-6 lg:scale-[0.94] lg:origin-center 2xl:scale-[0.9]">
-        <header className="flex items-center justify-start gap-6">
+      <div className="relative z-10 h-full w-full">
+        <header className="absolute left-5 top-5 z-20 flex items-center justify-start gap-6 md:left-8 md:top-6">
           <Link
             className="text-[26px] font-bold tracking-[-0.05em] text-[#0019a8] md:text-[30px]"
             href="#"
@@ -63,8 +63,8 @@ export default function LoginPage() {
           </Link>
         </header>
 
-        <main className="flex flex-1 items-center justify-center">
-          <div className="relative flex w-full max-w-[1500px] items-center justify-center">
+        <main className="flex h-full w-full items-center justify-center px-5 py-5 md:px-8 md:py-6 lg:scale-[0.94] lg:origin-center 2xl:scale-[0.9]">
+          <div className="relative flex w-full items-center justify-center">
             <div
               className="pointer-events-none absolute h-[470px] w-[470px] rounded-full blur-[120px]"
               style={{

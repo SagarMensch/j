@@ -1,5 +1,6 @@
 export type Verdict = "CLEAN" | "SUSPICIOUS" | "CONFIRMED_FORGERY";
 export type DuplicateStatus = "NO_MATCH" | "NEAR_DUPLICATE" | "EXACT_DUPLICATE";
+export type PrecheckStatus = "PASS" | "WARN" | "BLOCK";
 
 export interface EngineScores {
   ela_score: number;
@@ -81,6 +82,13 @@ export interface ForensicLayer {
   processing_ms: number;
 }
 
+export interface DocumentRoutingInfo {
+  provider: string;
+  source: string;
+  confidence: number;
+  language_code: string;
+}
+
 export interface AnalystReview {
   review_id: number;
   analyst_user_id: string;
@@ -151,10 +159,41 @@ export interface DevOpsMonitoringSummaryResponse {
   recent_warning_events: MonitoringWarningEvent[];
 }
 
+export interface PrecheckCheckResult {
+  key: string;
+  label: string;
+  status: PrecheckStatus;
+  message: string;
+  value: string | null;
+  page_index: number | null;
+}
+
+export interface PrecheckPageResult {
+  page_index: number;
+  width: number;
+  height: number;
+  status: PrecheckStatus;
+  checks: PrecheckCheckResult[];
+}
+
+export interface PrecheckResponse {
+  filename: string;
+  page_count: number;
+  overall_status: PrecheckStatus;
+  can_proceed: boolean;
+  blocking_check_count: number;
+  warning_check_count: number;
+  crc32_hash: string;
+  summary: string;
+  checks: PrecheckCheckResult[];
+  pages: PrecheckPageResult[];
+}
+
 export interface AnalysisResponse {
   analysis_id: string;
   filename: string;
   document_type: string | null;
+  document_routing: DocumentRoutingInfo | null;
   submitter_id: string | null;
   tenant_id: string | null;
   session_ip_address: string | null;
@@ -182,6 +221,9 @@ export interface AnalysisHistoryItem {
   analysis_id: string;
   filename: string;
   document_type: string | null;
+  document_provider: string | null;
+  document_source: string | null;
+  document_language_code: string | null;
   submitter_id: string | null;
   tenant_id: string | null;
   session_geolocation: string | null;

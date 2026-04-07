@@ -11,8 +11,8 @@ const plusJakartaSans = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Operational Trust",
-  description: "Enterprise-grade document forensic intelligence.",
+  title: "SequelForensics",
+  description: "Secure document review and verification.",
 };
 
 export default function RootLayout({

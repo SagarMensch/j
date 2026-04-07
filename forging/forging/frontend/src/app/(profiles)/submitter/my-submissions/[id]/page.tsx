@@ -2,8 +2,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { fetchAnalysis, resolveApiUrl } from "@/lib/api";
 import {
+  formatDocumentType,
   formatDateTime,
   formatPercent,
+  formatProvider,
   formatVerdict,
   verdictTone,
 } from "@/lib/format";
@@ -37,7 +39,7 @@ export default async function SubmitterSubmissionDetailPage({
               {analysis.filename}
             </h1>
             <p className="mt-2 max-w-2xl text-sm font-medium text-muted">
-              Analysis ID {analysis.analysis_id}
+              Reference ID {analysis.analysis_id}
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -61,10 +63,10 @@ export default async function SubmitterSubmissionDetailPage({
           <div className="flex items-center justify-between border-b border-border-color pb-5">
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-muted">
-                Primary Evidence
+                Document Preview
               </p>
               <h2 className="mt-2 text-2xl font-bold tracking-tight">
-                Rendered Document View
+                Reviewed Document
               </h2>
             </div>
           </div>
@@ -72,7 +74,7 @@ export default async function SubmitterSubmissionDetailPage({
           <div className="mt-6">
             {primaryPage ? (
               <img
-                alt={`${analysis.filename} forensic overlay`}
+                alt={`${analysis.filename} review overlay`}
                 className="w-full rounded-[24px] border border-border-color bg-background-light object-contain"
                 src={resolveApiUrl(primaryPage.artifacts.overlay_url)}
               />
@@ -106,13 +108,29 @@ export default async function SubmitterSubmissionDetailPage({
               </div>
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-muted">
+                  Detected Type
+                </p>
+                <p className="mt-1 text-sm font-bold">
+                  {formatDocumentType(analysis.document_type)}
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-muted">
+                  Text Route
+                </p>
+                <p className="mt-1 text-sm font-bold">
+                  {formatProvider(analysis.document_routing?.provider)}
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-muted">
                   Completed At
                 </p>
                 <p className="mt-1 text-sm font-bold">{formatDateTime(analysis.created_at)}</p>
               </div>
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-muted">
-                  Duplicate Status
+                  Similarity Check
                 </p>
                 <p className="mt-1 text-sm font-bold">
                   {analysis.duplicate_check.duplicate_status.replaceAll("_", " ")}
@@ -134,19 +152,19 @@ export default async function SubmitterSubmissionDetailPage({
               </div>
               <div className="rounded-2xl border border-border-color bg-background-light px-4 py-3">
                 <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-muted">
-                  Tampered Regions
+                  Marked Areas
                 </p>
                 <p className="mt-1 text-lg font-bold">{tamperedRegionCount}</p>
               </div>
               <div className="rounded-2xl border border-border-color bg-background-light px-4 py-3">
                 <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-muted">
-                  OCR Anomalies
+                  Text Issues
                 </p>
                 <p className="mt-1 text-lg font-bold">{analysis.ocr_anomalies.length}</p>
               </div>
               <div className="rounded-2xl border border-border-color bg-background-light px-4 py-3">
                 <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-muted">
-                  Warning Count
+                  System Notes
                 </p>
                 <p className="mt-1 text-lg font-bold">{analysis.warnings.length}</p>
               </div>

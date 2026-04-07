@@ -37,7 +37,7 @@ export default async function AnalystQueuePage() {
             </span>
           </div>
           <h2 className="text-white text-xl font-bold leading-tight tracking-tight">
-            Operational Trust
+            SequelForensics
           </h2>
         </div>
         <div className="flex flex-1 justify-end gap-6 items-center">
