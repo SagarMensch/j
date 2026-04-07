@@ -22,24 +22,44 @@ export default async function CaseDiagnosticsPage({
 
   const diagnostics = [
     {
-      name: "Checkpoint",
-      value: modelInfo?.checkpoint_path ?? "Unavailable",
-      status: modelInfo?.model_loaded ? "Online" : "Warning",
+      name: "Model Package",
+      value: modelInfo?.model_loaded
+        ? "Primary checkpoint active"
+        : "Model package unavailable",
+      detail: health?.checkpoint_exists
+        ? "The production model package is available to the review service."
+        : "The active model package could not be verified.",
+      status: modelInfo?.model_loaded ? "Healthy" : "Attention",
     },
     {
-      name: "Model Encoder",
-      value: modelInfo?.selected_encoder ?? "Unknown",
-      status: modelInfo?.selected_encoder ? "Online" : "Warning",
+      name: "Analysis Backbone",
+      value: modelInfo?.selected_encoder
+        ? formatBackbone(modelInfo.selected_encoder)
+        : "Backbone unavailable",
+      detail:
+        modelInfo?.input_channels != null
+          ? `${modelInfo.input_channels}-channel forensic stack configured for this service.`
+          : "Backbone metadata is currently unavailable.",
+      status: modelInfo?.selected_encoder ? "Healthy" : "Attention",
     },
     {
-      name: "Database",
-      value: health?.database_ready ? "PostgreSQL reachable" : "Database unavailable",
-      status: health?.database_ready ? "Online" : "Warning",
+      name: "Case Storage",
+      value: health?.database_ready
+        ? "Case datastore online"
+        : "Datastore unavailable",
+      detail: health?.database_ready
+        ? "History, queue, and persistence services are responding normally."
+        : "Stored analyses are temporarily unavailable.",
+      status: health?.database_ready ? "Healthy" : "Attention",
     },
     {
-      name: "Runtime Device",
-      value: modelInfo?.device ?? analysis.device,
-      status: health?.model_loaded ? "Online" : "Warning",
+      name: "Serving Profile",
+      value: describeRuntime(modelInfo?.device ?? analysis.device),
+      detail:
+        (modelInfo?.device ?? analysis.device) === "cuda"
+          ? "Accelerated compute is active for the review service."
+          : "The service is running on the standard compute lane.",
+      status: health?.model_loaded ? "Healthy" : "Attention",
     },
   ];
 
@@ -94,9 +114,10 @@ export default async function CaseDiagnosticsPage({
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.18em] text-muted">{item.name}</p>
-                  <p className="mt-3 text-base font-bold break-all">{item.value}</p>
+                  <p className="mt-3 text-base font-bold">{item.value}</p>
+                  <p className="mt-2 text-sm font-medium text-muted">{item.detail}</p>
                 </div>
-                <span className={`rounded-full px-3 py-1 text-xs font-bold ${item.status === "Online" ? "bg-accent-green/10 text-accent-green" : "bg-accent-amber/15 text-[#b45309]"}`}>
+                <span className={`rounded-full px-3 py-1 text-xs font-bold ${item.status === "Healthy" ? "bg-accent-green/10 text-accent-green" : "bg-accent-amber/15 text-[#b45309]"}`}>
                   {item.status}
                 </span>
               </div>
@@ -106,4 +127,18 @@ export default async function CaseDiagnosticsPage({
       </main>
     </div>
   );
+}
+
+function formatBackbone(value: string) {
+  return `${value.replaceAll("_", " ").toUpperCase()} backbone`;
+}
+
+function describeRuntime(value: string | null | undefined) {
+  if (value === "cuda") {
+    return "Accelerated compute active";
+  }
+  if (value === "cpu") {
+    return "Standard compute active";
+  }
+  return "Runtime profile available";
 }

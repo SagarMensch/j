@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { DocumentViewer } from "@/components/analysis/DocumentViewer";
 import { AnalysisTabs } from "@/components/restored/AnalysisTabs";
 import { fetchAnalysis, resolveApiUrl } from "@/lib/api";
 import { formatDateTime, formatPercent, formatVerdict, verdictTone } from "@/lib/format";
@@ -42,18 +43,20 @@ export default async function AnalysisDocumentPage({
       </header>
 
       <main className="flex flex-1 overflow-hidden">
-        <section className="flex w-full items-center justify-center bg-background-light p-8 lg:w-[60%]">
+        <section className="relative flex w-full items-center justify-center overflow-hidden bg-background-light lg:w-[60%]">
           {primaryPage ? (
-            <div className="overflow-hidden rounded-[24px] border border-border-color bg-white shadow-subtle">
-              <img
-                alt={`${analysis.filename} original page`}
-                className="block h-auto max-h-[78vh] w-auto max-w-full"
-                src={resolveApiUrl(primaryPage.artifacts.original_url)}
-              />
-            </div>
+            <DocumentViewer
+              alt={`${analysis.filename} original page`}
+              imageUrl={resolveApiUrl(primaryPage.artifacts.original_url)}
+              pageHeight={primaryPage.height}
+              pageWidth={primaryPage.width}
+              maxHeightClassName="max-h-[78vh]"
+            />
           ) : (
-            <div className="rounded-[24px] border border-dashed border-border-color bg-surface px-8 py-20 text-sm font-medium text-muted">
-              No document preview is available for this case.
+            <div className="p-8">
+              <div className="rounded-[24px] border border-dashed border-border-color bg-surface px-8 py-20 text-sm font-medium text-muted">
+                No document preview is available for this case.
+              </div>
             </div>
           )}
         </section>

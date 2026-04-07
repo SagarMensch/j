@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { DocumentViewer } from "@/components/analysis/DocumentViewer";
 import { AnalysisTabs } from "@/components/restored/AnalysisTabs";
 import { fetchAnalysis, resolveApiUrl } from "@/lib/api";
 import {
@@ -76,71 +77,21 @@ export default async function AnalysisStatusPage({
       <main className="flex flex-1 overflow-hidden">
         {/* Left: Document Canvas (60%) */}
         <section className="w-[60%] h-full relative bg-white flex items-center justify-center overflow-hidden">
-          {/* Document Image Placeholder */}
-          <div className="w-full h-full p-8 flex items-center justify-center">
-            {primaryPage ? (
-              <div className="relative max-w-full max-h-full shadow-lg border border-border-color rounded-lg overflow-hidden">
-                <img
-                  alt="Document Scan"
-                  className="object-contain max-h-[819px] w-auto"
-                  src={resolveApiUrl(primaryPage.artifacts.overlay_url)}
-                />
-
-                {/* Target box for anomaly */}
-                {topRegion ? (
-                  <div
-                    className="absolute border-2 border-accent-red bg-accent-red/10 rounded pointer-events-none"
-                    style={{
-                      left: `${(topRegion.x / primaryPage.width) * 100}%`,
-                      top: `${(topRegion.y / primaryPage.height) * 100}%`,
-                      width: `${(topRegion.width / primaryPage.width) * 100}%`,
-                      height: `${(topRegion.height / primaryPage.height) * 100}%`,
-                    }}
-                  ></div>
-                ) : null}
-              </div>
-            ) : (
+          {primaryPage ? (
+            <DocumentViewer
+              alt="Document Scan"
+              imageUrl={resolveApiUrl(primaryPage.artifacts.overlay_url)}
+              pageHeight={primaryPage.height}
+              pageWidth={primaryPage.width}
+              topRegion={topRegion}
+            />
+          ) : (
+            <div className="w-full h-full p-8 flex items-center justify-center">
               <div className="rounded-[24px] border border-dashed border-border-color bg-surface px-8 py-20 text-center text-sm font-medium text-muted">
                 No rendered page artifacts were returned by the backend.
               </div>
-            )}
-          </div>
-
-          {/* Floating Control Pill */}
-          <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-surface p-2 rounded-full shadow-subtle border border-border-color">
-            <button
-              className="p-2 rounded-full hover:bg-white text-text-main transition-colors flex items-center justify-center"
-              title="Zoom Out"
-            >
-              <span className="material-symbols-outlined text-xl">remove</span>
-            </button>
-            <span className="text-sm font-bold w-12 text-center select-none">
-              100%
-            </span>
-            <button
-              className="p-2 rounded-full hover:bg-white text-text-main transition-colors flex items-center justify-center"
-              title="Zoom In"
-            >
-              <span className="material-symbols-outlined text-xl">add</span>
-            </button>
-            <div className="w-px h-6 bg-border-color mx-1"></div>
-            <button
-              className="p-2 rounded-full hover:bg-white text-text-main transition-colors flex items-center justify-center"
-              title="Pan Tool"
-            >
-              <span className="material-symbols-outlined text-xl">
-                pan_tool
-              </span>
-            </button>
-            <button
-              className="p-2 rounded-full hover:bg-white text-text-main transition-colors flex items-center justify-center"
-              title="Reset View"
-            >
-              <span className="material-symbols-outlined text-xl">
-                fit_screen
-              </span>
-            </button>
-          </div>
+            </div>
+          )}
         </section>
 
         {/* Right: Contextual Analysis Panel (40%) */}

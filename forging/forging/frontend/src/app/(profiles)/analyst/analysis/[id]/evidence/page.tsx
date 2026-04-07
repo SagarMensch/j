@@ -49,7 +49,7 @@ export default async function EvidencePage({
                 <h1 className="text-[32px] font-bold leading-tight tracking-tight">Evidence Stack</h1>
               </div>
               <p className="ml-6 text-base font-medium text-muted">
-                Combined artifact view from the persisted FastAPI analysis.
+                Consolidated artifact evidence from the stored case review.
               </p>
             </div>
 

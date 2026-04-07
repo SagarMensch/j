@@ -15,10 +15,35 @@ export default async function DevopsDashboardPage() {
   ]);
 
   const cards = [
-    ["Health Endpoint", health?.status === "ok" ? "OK" : "Unavailable"],
-    ["Model Loaded", modelInfo?.model_loaded ? "Yes" : "No"],
-    ["Database Ready", health?.database_ready ? "Yes" : "No"],
-    ["Checkpoint Exists", health?.checkpoint_exists ? "Yes" : "No"],
+    {
+      label: "Model Package",
+      value: modelInfo?.model_loaded ? "Primary checkpoint active" : "Model attention required",
+      detail: health?.checkpoint_exists
+        ? "The production review package is available to the service."
+        : "The service cannot find the current checkpoint package.",
+    },
+    {
+      label: "Analysis Backbone",
+      value: modelInfo?.selected_encoder
+        ? formatEncoderName(modelInfo.selected_encoder)
+        : "Backbone unavailable",
+      detail:
+        modelInfo?.input_channels != null
+          ? `${modelInfo.input_channels}-channel forensic review stack configured.`
+          : "Backbone configuration is not available.",
+    },
+    {
+      label: "Case Storage",
+      value: health?.database_ready ? "Case datastore online" : "Datastore unavailable",
+      detail: health?.database_ready
+        ? "Queue, history, and persistence services are responding."
+        : "Case persistence needs attention before review can continue.",
+    },
+    {
+      label: "Serving Profile",
+      value: health?.status === "ok" ? "Ready for intake" : "Service attention required",
+      detail: buildRuntimeDetail(modelInfo?.device),
+    },
   ];
 
   return (
@@ -35,16 +60,19 @@ export default async function DevopsDashboardPage() {
       <main className="grid flex-1 gap-8 p-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:p-8">
         <section className="rounded-[28px] border border-border-color bg-white p-6 shadow-subtle">
           <div className="grid gap-4 md:grid-cols-2">
-            {cards.map(([label, value]) => (
+            {cards.map((card) => (
               <div
                 className="rounded-[24px] border border-border-color bg-background-light p-5"
-                key={label}
+                key={card.label}
               >
                 <p className="text-xs font-bold uppercase tracking-[0.18em] text-muted">
-                  {label}
+                  {card.label}
                 </p>
-                <p className="mt-4 text-3xl font-bold tracking-tight">
-                  {value}
+                <p className="mt-4 text-2xl font-bold tracking-tight leading-tight">
+                  {card.value}
+                </p>
+                <p className="mt-3 text-sm font-medium text-muted">
+                  {card.detail}
                 </p>
               </div>
             ))}
@@ -53,21 +81,32 @@ export default async function DevopsDashboardPage() {
           <div className="mt-8 grid gap-4 md:grid-cols-2">
             <div className="rounded-[24px] border border-border-color bg-background-light p-5">
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-muted">
-                Checkpoint
+                Model Release
               </p>
-              <p className="mt-4 break-all text-base font-bold">
-                {modelInfo?.checkpoint_path ?? "Unavailable"}
+              <p className="mt-4 text-base font-bold">
+                {modelInfo?.model_loaded
+                  ? "Production checkpoint synced"
+                  : "Checkpoint unavailable"}
+              </p>
+              <p className="mt-2 text-sm font-medium text-muted">
+                {health?.checkpoint_exists
+                  ? "The active model package is available for live review."
+                  : "The service needs a valid checkpoint file before it can accept cases."}
               </p>
             </div>
             <div className="rounded-[24px] border border-border-color bg-background-light p-5">
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-muted">
-                Encoder
+                Review Stack
               </p>
               <p className="mt-4 text-base font-bold">
-                {modelInfo?.selected_encoder ?? "Unknown"}
+                {modelInfo?.selected_encoder
+                  ? `${formatEncoderName(modelInfo.selected_encoder)} backbone`
+                  : "Configuration unavailable"}
               </p>
               <p className="mt-2 text-sm font-medium text-muted">
-                Input channels {modelInfo?.input_channels ?? "?"}
+                {modelInfo?.input_channels != null
+                  ? `${modelInfo.input_channels} forensic input channels are active.`
+                  : "Input channel metadata is unavailable."}
               </p>
             </div>
           </div>
@@ -217,4 +256,18 @@ export default async function DevopsDashboardPage() {
       </main>
     </div>
   );
+}
+
+function formatEncoderName(value: string) {
+  return value.replaceAll("_", " ").toUpperCase();
+}
+
+function buildRuntimeDetail(device: string | null | undefined) {
+  if (device === "cuda") {
+    return "Hardware acceleration is active for the live serving profile.";
+  }
+  if (device === "cpu") {
+    return "The service is running on the standard compute lane.";
+  }
+  return "The runtime profile is available, but device metadata is limited.";
 }

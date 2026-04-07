@@ -1,17 +1,43 @@
 import Link from "next/link";
-import { fetchDashboardSummary } from "@/lib/api";
+import { fetchAnalyses } from "@/lib/api";
+import { AnalysisHistoryItem } from "@/lib/api-types";
 import {
-  formatRelativeTime,
+  formatDocumentType,
   formatPercent,
+  formatRelativeTime,
   formatVerdict,
 } from "@/lib/format";
 
-export default async function AnalystQueuePage() {
-  const summary = await fetchDashboardSummary().catch(() => null);
-  const flagged = summary?.flagged_analyses ?? [];
-  const criticalCount = flagged.filter(
-    (f) => f.verdict === "CONFIRMED_FORGERY",
-  ).length;
+type QueueView = "all" | "clean" | "suspicious" | "critical";
+
+const VIEW_LABELS: Record<QueueView, string> = {
+  all: "All",
+  clean: "Clean",
+  suspicious: "Suspicious",
+  critical: "Critical",
+};
+
+export default async function AnalystQueuePage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ view?: string }>;
+}) {
+  const resolvedSearchParams = (await searchParams) ?? {};
+  const activeView = normaliseView(resolvedSearchParams.view);
+  const history = await fetchAnalyses(100).catch(() => ({
+    page: 1,
+    page_size: 100,
+    total: 0,
+    items: [],
+  }));
+  const items = history.items;
+  const filtered = filterItems(items, activeView);
+  const counts = {
+    all: items.length,
+    clean: items.filter((item) => item.verdict === "CLEAN").length,
+    suspicious: items.filter((item) => item.verdict === "SUSPICIOUS").length,
+    critical: items.filter((item) => item.verdict === "CONFIRMED_FORGERY").length,
+  } satisfies Record<QueueView, number>;
 
   return (
     <div
@@ -22,7 +48,6 @@ export default async function AnalystQueuePage() {
         color: "#121212",
       }}
     >
-      {/* Header — clone of findings_status/code.html line 59-73, exact same primary bg */}
       <header
         className="flex items-center justify-between whitespace-nowrap px-10 py-4 text-white"
         style={{ backgroundColor: "#0019A8" }}
@@ -64,7 +89,6 @@ export default async function AnalystQueuePage() {
         </div>
       </header>
 
-      {/* Main Content — split screen like findings_status/code.html line 78-197 but full-width for queue */}
       <main
         className="flex-1 flex flex-col"
         style={{ backgroundColor: "#F4F6F8" }}
@@ -73,7 +97,6 @@ export default async function AnalystQueuePage() {
           className="flex-1 flex flex-col h-full"
           style={{ boxShadow: "0 4px 20px rgba(0,0,0,0.04)" }}
         >
-          {/* Context Header — clone of line 108-111 */}
           <div className="px-8 pt-8 pb-4">
             <p
               className="text-sm font-medium mb-1 uppercase tracking-wider"
@@ -85,103 +108,102 @@ export default async function AnalystQueuePage() {
               className="text-3xl font-bold tracking-tight"
               style={{ color: "#121212" }}
             >
-              Documents Pending Review
+              Document Analysis Queue
             </h1>
           </div>
 
-          {/* Tabs — clone of findings_status/code.html line 113-126 */}
           <div
             className="flex px-8 gap-8"
             style={{ borderBottom: "1px solid #E5E5E5" }}
           >
-            <a
-              className="flex flex-col items-center justify-center pb-3 pt-4"
-              style={{ borderBottom: "4px solid #0019A8", color: "#121212" }}
-              href="#"
-            >
-              <p className="text-sm font-bold leading-normal">
-                All ({flagged.length})
-              </p>
-            </a>
-            <a
-              className="flex flex-col items-center justify-center pb-3 pt-4 hover:text-[#121212] transition-colors"
-              style={{
-                borderBottom: "4px solid transparent",
-                color: "#737373",
-              }}
-              href="#"
-            >
-              <p className="text-sm font-bold leading-normal">
-                Critical ({criticalCount})
-              </p>
-            </a>
-            <a
-              className="flex flex-col items-center justify-center pb-3 pt-4 hover:text-[#121212] transition-colors"
-              style={{
-                borderBottom: "4px solid transparent",
-                color: "#737373",
-              }}
-              href="#"
-            >
-              <p className="text-sm font-bold leading-normal">
-                Suspicious ({flagged.length - criticalCount})
-              </p>
-            </a>
+            {(["all", "clean", "suspicious", "critical"] as QueueView[]).map(
+              (view) => {
+                const active = activeView === view;
+                return (
+                  <Link
+                    className="flex flex-col items-center justify-center pb-3 pt-4 hover:text-[#121212] transition-colors"
+                    href={view === "all" ? "/analyst/queue" : `/analyst/queue?view=${view}`}
+                    key={view}
+                    style={{
+                      borderBottom: active
+                        ? "4px solid #0019A8"
+                        : "4px solid transparent",
+                      color: active ? "#121212" : "#737373",
+                    }}
+                  >
+                    <p className="text-sm font-bold leading-normal">
+                      {VIEW_LABELS[view]} ({counts[view]})
+                    </p>
+                  </Link>
+                );
+              },
+            )}
           </div>
 
-          {/* Scrollable Content: Queue Items — clone of findings_status/code.html line 128-188, using the exact status row pattern */}
           <div className="flex-1 overflow-y-auto p-8 space-y-4">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-bold" style={{ color: "#121212" }}>
-                Integrity Findings
+                {sectionTitle(activeView)}
               </h2>
-              {criticalCount > 0 && (
-                <span className="px-3 py-1 rounded-full text-sm font-bold bg-accent-red text-white">
-                  {criticalCount} Critical
-                </span>
-              )}
+              <span
+                className="px-3 py-1 rounded-full text-sm font-bold"
+                style={{
+                  backgroundColor: "#E9ECFF",
+                  color: "#0019A8",
+                }}
+              >
+                {filtered.length} shown
+              </span>
             </div>
 
-            {flagged.length > 0 ? (
-              flagged.map((item) => {
-                const isRed = item.verdict === "CONFIRMED_FORGERY";
-                const stripColor = isRed
-                  ? "var(--color-accent-red)"
-                  : "var(--color-accent-amber)";
-                const statusText = isRed
-                  ? formatVerdict(item.verdict)
-                  : formatVerdict(item.verdict);
-                const statusColor = isRed
-                  ? "var(--color-accent-red)"
-                  : "var(--color-accent-amber)";
+            {filtered.length > 0 ? (
+              filtered.map((item) => {
+                const tone = rowTone(item);
 
                 return (
                   <Link
                     key={item.analysis_id}
                     href={`/analyst/analysis/${item.analysis_id}`}
-                    className="w-full flex items-stretch h-16 bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow group text-left cursor-pointer"
-                    style={{ border: "1px solid #E5E5E5" }}
+                    className="w-full flex items-stretch bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow group text-left cursor-pointer"
+                    style={{ border: "1px solid #E5E5E5", minHeight: "84px" }}
                   >
                     <div
                       className="w-2 shrink-0"
-                      style={{ backgroundColor: stripColor }}
+                      style={{ backgroundColor: tone.stripColor }}
                     ></div>
-                    <div className="flex-1 flex items-center justify-between px-6">
-                      <div className="flex flex-col">
+                    <div className="flex-1 flex items-center justify-between gap-6 px-6 py-4">
+                      <div className="min-w-0">
                         <span
-                          className="text-lg font-bold group-hover:text-[#0019A8] transition-colors"
+                          className="block truncate text-lg font-bold group-hover:text-[#0019A8] transition-colors"
                           style={{ color: "#121212" }}
                         >
                           {item.filename}
                         </span>
-                        <span
-                          className="text-sm font-medium"
-                          style={{ color: statusColor }}
-                        >
-                          {statusText}
-                        </span>
+                        <div className="mt-2 flex flex-wrap items-center gap-3">
+                          <span
+                            className="rounded-full px-3 py-1 text-xs font-bold"
+                            style={{
+                              backgroundColor: tone.badgeBackground,
+                              color: tone.badgeText,
+                            }}
+                          >
+                            {formatVerdict(item.verdict)}
+                          </span>
+                          <span
+                            className="text-xs font-medium uppercase tracking-[0.18em]"
+                            style={{ color: "#737373" }}
+                          >
+                            {formatDocumentType(item.document_type)}
+                          </span>
+                          <span
+                            className="text-xs font-medium"
+                            style={{ color: "#737373" }}
+                          >
+                            {item.analysis_id}
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-4">
+                      <div className="flex shrink-0 items-center gap-4">
                         <span
                           className="text-sm font-bold"
                           style={{ color: "#121212" }}
@@ -210,12 +232,11 @@ export default async function AnalystQueuePage() {
                 className="p-12 text-center text-sm font-medium"
                 style={{ color: "#737373" }}
               >
-                No documents pending review.
+                {emptyState(activeView)}
               </div>
             )}
           </div>
 
-          {/* Bottom Action Area — clone of findings_status/code.html line 189-195 */}
           <div
             className="p-8"
             style={{
@@ -236,4 +257,72 @@ export default async function AnalystQueuePage() {
       </main>
     </div>
   );
+}
+
+function normaliseView(value?: string): QueueView {
+  if (value === "clean" || value === "suspicious" || value === "critical") {
+    return value;
+  }
+  return "all";
+}
+
+function filterItems(items: AnalysisHistoryItem[], view: QueueView) {
+  if (view === "clean") {
+    return items.filter((item) => item.verdict === "CLEAN");
+  }
+  if (view === "suspicious") {
+    return items.filter((item) => item.verdict === "SUSPICIOUS");
+  }
+  if (view === "critical") {
+    return items.filter((item) => item.verdict === "CONFIRMED_FORGERY");
+  }
+  return items;
+}
+
+function sectionTitle(view: QueueView) {
+  if (view === "clean") {
+    return "Clean Document Analyses";
+  }
+  if (view === "suspicious") {
+    return "Suspicious Findings";
+  }
+  if (view === "critical") {
+    return "Critical Findings";
+  }
+  return "All Document Analyses";
+}
+
+function emptyState(view: QueueView) {
+  if (view === "clean") {
+    return "No clean analyses are available yet.";
+  }
+  if (view === "suspicious") {
+    return "No suspicious analyses are available yet.";
+  }
+  if (view === "critical") {
+    return "No critical analyses are available yet.";
+  }
+  return "No analyses are available yet.";
+}
+
+function rowTone(item: AnalysisHistoryItem) {
+  if (item.verdict === "CONFIRMED_FORGERY") {
+    return {
+      stripColor: "var(--color-accent-red)",
+      badgeBackground: "rgba(238, 42, 36, 0.12)",
+      badgeText: "var(--color-accent-red)",
+    };
+  }
+  if (item.verdict === "SUSPICIOUS") {
+    return {
+      stripColor: "var(--color-accent-amber)",
+      badgeBackground: "rgba(255, 200, 10, 0.18)",
+      badgeText: "#A86000",
+    };
+  }
+  return {
+    stripColor: "var(--color-accent-green)",
+    badgeBackground: "rgba(0, 130, 59, 0.12)",
+    badgeText: "var(--color-accent-green)",
+  };
 }

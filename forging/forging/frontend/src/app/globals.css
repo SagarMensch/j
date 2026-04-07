@@ -93,6 +93,16 @@
         color: inherit;
         text-decoration: none;
     }
+
+    @media print {
+        html {
+            zoom: 1 !important;
+        }
+
+        body {
+            background: #ffffff !important;
+        }
+    }
 }
 
 /* ─── Material Symbols — ALL icons are 3D Solid Filled ──── */

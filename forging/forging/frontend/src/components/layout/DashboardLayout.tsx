@@ -16,8 +16,9 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
   // Landing page and login page: full-width, no sidebar
   const isPublicRoute = PUBLIC_ROUTES.includes(pathname);
+  const isPrintRoute = pathname.includes("/report/print");
 
-  if (isPublicRoute) {
+  if (isPublicRoute || isPrintRoute) {
     return <main className="min-h-full">{children}</main>;
   }
 

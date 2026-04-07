@@ -103,6 +103,9 @@ export default async function ReportPage({
               <h3 className="text-lg font-bold">Case Summary</h3>
               <div className="mt-4 space-y-3">
                 <p className="text-sm font-medium text-muted">
+                  Document pages: <span className="font-bold text-text-main">{analysis.page_count}</span>
+                </p>
+                <p className="text-sm font-medium text-muted">
                   Duplicate status: <span className="font-bold text-text-main">{analysis.duplicate_check.duplicate_status.replaceAll("_", " ")}</span>
                 </p>
                 <p className="text-sm font-medium text-muted">
@@ -122,10 +125,18 @@ export default async function ReportPage({
               </div>
             </section>
 
-            <button className="flex h-14 w-full items-center justify-center gap-2 rounded-[32px] bg-primary text-base font-bold text-white shadow-sm transition-colors hover:bg-primary/90">
+            <Link
+              className="flex h-14 w-full items-center justify-center gap-2 rounded-[32px] bg-primary text-base font-bold text-white shadow-sm transition-colors hover:bg-primary/90"
+              href={`/analyst/analysis/${analysis.analysis_id}/report/print?autoprint=1`}
+              rel="noreferrer"
+              target="_blank"
+            >
               <span className="material-symbols-outlined text-xl">picture_as_pdf</span>
               <span>Generate PDF</span>
-            </button>
+            </Link>
+            <p className="text-center text-xs font-medium text-muted">
+              Opens a print-ready export that includes every document page and reviewed image.
+            </p>
           </aside>
         </div>
       </div>
