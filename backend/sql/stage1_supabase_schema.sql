@@ -242,6 +242,74 @@ create table if not exists admin_audit_logs (
 
 create index if not exists idx_admin_audit_logs_actor_created on admin_audit_logs(actor_user_id, created_at desc);
 
+create table if not exists chat_conversations (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid not null references users(id) on delete cascade,
+    title text not null,
+    language text not null default 'en',
+    status text not null default 'active',
+    metadata jsonb not null default '{}'::jsonb,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    last_message_at timestamptz not null default now()
+);
+
+create index if not exists idx_chat_conversations_user_last_message
+    on chat_conversations(user_id, last_message_at desc);
+
+create table if not exists chat_messages (
+    id uuid primary key default gen_random_uuid(),
+    conversation_id uuid not null references chat_conversations(id) on delete cascade,
+    message_order integer not null,
+    role text not null,
+    content text not null,
+    language text,
+    citations jsonb not null default '[]'::jsonb,
+    query_text text,
+    retrieval_event_id uuid,
+    response_mode text not null default 'text',
+    created_at timestamptz not null default now()
+);
+
+create unique index if not exists idx_chat_messages_conversation_order
+    on chat_messages(conversation_id, message_order);
+create index if not exists idx_chat_messages_conversation_created
+    on chat_messages(conversation_id, created_at);
+
+create table if not exists chat_reader_conversations (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid not null references users(id) on delete cascade,
+    title text not null,
+    language text not null default 'en',
+    status text not null default 'active',
+    metadata jsonb not null default '{}'::jsonb,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    last_message_at timestamptz not null default now()
+);
+
+create index if not exists idx_chat_reader_conversations_user_last_message
+    on chat_reader_conversations(user_id, last_message_at desc);
+
+create table if not exists chat_reader_messages (
+    id uuid primary key default gen_random_uuid(),
+    conversation_id uuid not null references chat_reader_conversations(id) on delete cascade,
+    message_order integer not null,
+    role text not null,
+    content text not null,
+    language text,
+    citations jsonb not null default '[]'::jsonb,
+    query_text text,
+    retrieval_event_id uuid,
+    response_mode text not null default 'text',
+    created_at timestamptz not null default now()
+);
+
+create unique index if not exists idx_chat_reader_messages_conversation_order
+    on chat_reader_messages(conversation_id, message_order);
+create index if not exists idx_chat_reader_messages_conversation_created
+    on chat_reader_messages(conversation_id, created_at);
+
 create table if not exists retrieval_events (
     id uuid primary key default gen_random_uuid(),
     user_id uuid references users(id),
@@ -266,3 +334,25 @@ create table if not exists feedback_events (
     comment text,
     created_at timestamptz not null default now()
 );
+
+-- Retrieval/query performance indexes
+create index if not exists idx_document_revisions_latest_approved
+    on document_revisions(is_latest_approved)
+    where is_latest_approved = true;
+
+create index if not exists idx_document_chunks_revision_created
+    on document_chunks(revision_id, created_at desc);
+
+create index if not exists idx_document_chunks_fts
+    on document_chunks
+    using gin (
+        to_tsvector(
+            'simple',
+            coalesce(content, '') || ' ' || coalesce(section_title, '') || ' ' || coalesce(citation_label, '')
+        )
+    );
+
+create index if not exists idx_document_chunks_embedding_ivfflat
+    on document_chunks
+    using ivfflat (embedding vector_cosine_ops)
+    with (lists = 100);

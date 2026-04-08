@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { OperatorLayout } from "@/components/operator/operator-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -81,6 +82,7 @@ type QueryEvidencePayload = {
 
 type QueryApiResponse = {
   answer: string;
+  conversation_id?: string;
   evidence?: QueryEvidencePayload[];
 };
 
@@ -106,7 +108,51 @@ type VoiceApiResponse = {
   assistant_text: string;
   assistant_tts_text?: string;
   audio_base64?: string;
+  audio_mime_type?: string;
+  stt_status?: string;
+  conversation_id?: string;
   citations?: VoiceCitationPayload[];
+};
+
+type ConversationSummaryPayload = {
+  id: string;
+  user_id: string;
+  title: string;
+  language: string;
+  status: string;
+  chat_scope?: "general" | "reader";
+  revision_id?: string | null;
+  message_count: number;
+  preview?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  last_message_at?: string | null;
+};
+
+type ConversationMessagePayload = {
+  id: string;
+  role: string;
+  content: string;
+  language?: string | null;
+  citations?: QueryEvidencePayload[];
+  query_text?: string | null;
+  retrieval_event_id?: string | null;
+  response_mode?: string;
+  created_at?: string | null;
+};
+
+type ConversationDetailPayload = {
+  conversation: ConversationSummaryPayload;
+  messages: ConversationMessagePayload[];
+};
+
+type ChatMessage = {
+  id?: string;
+  role: string;
+  content: string;
+  citations?: CitationType[];
+  createdAt?: string | null;
+  responseMode?: string;
 };
 
 type DashboardSummaryResponse = {
@@ -139,7 +185,14 @@ type LookupCopy = {
   placeholder: string;
   followUpPlaceholder: string;
   askButton: string;
+  voiceStartAction: string;
+  voiceStopRecordingAction: string;
+  voiceCancelProcessingAction: string;
+  voiceStopPlaybackAction: string;
+  voiceReady: string;
   listening: string;
+  voiceProcessing: string;
+  voicePlaying: string;
   conversation: string;
   sources: string;
   sourceDoc: string;
@@ -152,6 +205,10 @@ type LookupCopy = {
   voiceError: string;
   queryError: string;
   voiceUnsupported: string;
+  newChat: string;
+  recentChats: string;
+  noChats: string;
+  loadingChats: string;
   features: string[];
 };
 
@@ -161,6 +218,25 @@ type HighlightBox = {
   width: number;
   height: number;
 };
+
+type AnswerParagraph = {
+  text: string;
+  proofText: string;
+  primaryCitation: CitationType | null;
+  segments: {
+    text: string;
+    citation: CitationType | null;
+    isCitation: boolean;
+  }[];
+};
+
+type TextSegment = {
+  text: string;
+  highlighted: boolean;
+};
+
+type VoiceState = "idle" | "recording" | "processing" | "playing";
+type ConversationScope = "general" | "reader";
 
 function normalizeApiAssetUrl(url?: string | null) {
   if (!url) return null;
@@ -173,6 +249,7 @@ function normalizeApiAssetUrl(url?: string | null) {
 function getHighlightBoxes(
   citation: CitationType | null,
   pagePayload: PagePayload | null,
+  proofTarget?: string | null,
 ) {
   if (!citation || !pagePayload) {
     return [] as HighlightBox[];
@@ -211,6 +288,52 @@ function getHighlightBoxes(
     return blockHighlights;
   }
 
+  const normalizedProofTarget = normalizeForMatch(proofTarget || "");
+  if (normalizedProofTarget) {
+    const textMatchedHighlights = pagePayload.blocks
+      .filter((block) => {
+        const blockText = normalizeForMatch(block.text || "");
+        return (
+          blockText.length > 0 &&
+          (normalizedProofTarget.includes(blockText) ||
+            blockText.includes(normalizedProofTarget) ||
+            normalizedProofTarget
+              .split(" ")
+              .filter(Boolean)
+              .slice(0, 8)
+              .every((word) => blockText.includes(word)))
+        );
+      })
+      .flatMap((block) => {
+        const left = block.bbox_left;
+        const top = block.bbox_top;
+        const right = block.bbox_right;
+        const bottom = block.bbox_bottom;
+        if (
+          left == null ||
+          top == null ||
+          right == null ||
+          bottom == null ||
+          right <= left ||
+          bottom <= top
+        ) {
+          return [];
+        }
+        return [
+          {
+            left,
+            top,
+            width: right - left,
+            height: bottom - top,
+          },
+        ];
+      });
+
+    if (textMatchedHighlights.length > 0) {
+      return textMatchedHighlights;
+    }
+  }
+
   if (
     citation.bboxX0 != null &&
     citation.bboxY0 != null &&
@@ -232,6 +355,179 @@ function getHighlightBoxes(
   return [];
 }
 
+function normalizeAnswerText(text: string) {
+  return text
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/__(.*?)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\r/g, "")
+    .trim();
+}
+
+function parseAnswerParagraphs(
+  text: string,
+  citations?: CitationType[],
+): AnswerParagraph[] {
+  const normalized = normalizeAnswerText(text);
+  const lines = normalized
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  return lines.map((line) => {
+    const segments: AnswerParagraph["segments"] = [];
+    const citationPattern = /\[(\d+)([^\]]*)\]/g;
+    let lastIndex = 0;
+    let primaryCitation: CitationType | null = null;
+
+    for (const match of line.matchAll(citationPattern)) {
+      const matchIndex = match.index ?? 0;
+      if (matchIndex > lastIndex) {
+        segments.push({
+          text: line.slice(lastIndex, matchIndex),
+          citation: null,
+          isCitation: false,
+        });
+      }
+
+      const citationIndex = Number(match[1]) - 1;
+      const citation = citations?.[citationIndex] ?? null;
+      if (!primaryCitation && citation) {
+        primaryCitation = citation;
+      }
+
+      segments.push({
+        text: match[0],
+        citation,
+        isCitation: true,
+      });
+      lastIndex = matchIndex + match[0].length;
+    }
+
+    if (lastIndex < line.length) {
+      segments.push({
+        text: line.slice(lastIndex),
+        citation: null,
+        isCitation: false,
+      });
+    }
+
+    return {
+      text: line,
+      proofText: line.replace(/\[[^\]]+\]/g, "").trim(),
+      primaryCitation,
+      segments: segments.length
+        ? segments
+        : [
+            {
+              text: line,
+              citation: null,
+              isCitation: false,
+            },
+          ],
+    };
+  });
+}
+
+function getSourceProofText(
+  citation: CitationType | null,
+  pagePayload: PagePayload | null,
+) {
+  if (!citation || !pagePayload) {
+    return "";
+  }
+
+  const blockTexts = pagePayload.blocks
+    .filter(
+      (block) =>
+        citation.blockIds.includes(block.block_id) && (block.text || "").trim(),
+    )
+    .map((block) => (block.text || "").trim());
+
+  if (blockTexts.length > 0) {
+    return blockTexts.join("\n\n");
+  }
+
+  return (pagePayload.page.raw_text || "").trim();
+}
+
+function normalizeForMatch(text: string) {
+  return text
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, "")
+    .trim();
+}
+
+function getProofHighlightPhrases(
+  citation: CitationType | null,
+  pagePayload: PagePayload | null,
+) {
+  if (!citation || !pagePayload) {
+    return [] as string[];
+  }
+
+  const phrases = pagePayload.blocks
+    .filter(
+      (block) =>
+        citation.blockIds.includes(block.block_id) && (block.text || "").trim(),
+    )
+    .map((block) => (block.text || "").trim())
+    .filter(Boolean);
+
+  if (phrases.length > 0) {
+    return phrases;
+  }
+
+  const fallback = (pagePayload.page.raw_text || "").trim();
+  return fallback ? [fallback] : [];
+}
+
+function highlightProofText(text: string, phrases: string[]) {
+  if (!text.trim() || phrases.length === 0) {
+    return [{ text, highlighted: false }] as TextSegment[];
+  }
+
+  const normalizedText = normalizeForMatch(text);
+  const normalizedPhrases = phrases
+    .map((phrase) => ({
+      raw: phrase,
+      normalized: normalizeForMatch(phrase),
+    }))
+    .filter((item) => item.normalized.length >= 20)
+    .sort((a, b) => b.normalized.length - a.normalized.length);
+
+  const match = normalizedPhrases.find((item) =>
+    normalizedText.includes(item.normalized),
+  );
+
+  if (!match) {
+    return [{ text, highlighted: false }] as TextSegment[];
+  }
+
+  const phraseWords = match.raw.split(/\s+/).filter(Boolean);
+  if (phraseWords.length < 4) {
+    return [{ text, highlighted: false }] as TextSegment[];
+  }
+
+  const escapedWords = phraseWords
+    .slice(0, Math.min(24, phraseWords.length))
+    .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const regex = new RegExp(`(${escapedWords.join("\\s+")})`, "i");
+  const parts = text.split(regex);
+
+  if (parts.length === 1) {
+    return [{ text, highlighted: false }] as TextSegment[];
+  }
+
+  return parts
+    .filter((part) => part.length > 0)
+    .map((part) => ({
+      text: part,
+      highlighted: regex.test(part),
+    }));
+}
+
 const COPY: Record<AppLanguage, LookupCopy> = {
   ENG: {
     title: "Ask SOP, get exact answer",
@@ -240,7 +536,14 @@ const COPY: Record<AppLanguage, LookupCopy> = {
     placeholder: "Ask procedure, safety step, machine operation...",
     followUpPlaceholder: "Ask follow-up...",
     askButton: "Ask",
+    voiceStartAction: "Start voice",
+    voiceStopRecordingAction: "Stop and send",
+    voiceCancelProcessingAction: "Cancel",
+    voiceStopPlaybackAction: "Stop audio",
+    voiceReady: "Tap once to start. Tap again to stop and send.",
     listening: "Listening. Speak now.",
+    voiceProcessing: "Processing voice query. Tap cancel to stop.",
+    voicePlaying: "Playing voice answer. Tap stop audio to end playback.",
     conversation: "Conversation",
     sources: "Sources",
     sourceDoc: "Source Document",
@@ -253,6 +556,10 @@ const COPY: Record<AppLanguage, LookupCopy> = {
     voiceError: "Voice query failed. Please try again.",
     queryError: "Could not connect to backend right now.",
     voiceUnsupported: "Voice input is not supported in this browser.",
+    newChat: "New Chat",
+    recentChats: "Recent Chats",
+    noChats: "No saved chats yet.",
+    loadingChats: "Loading saved chats...",
     features: ["Voice query", "Hindi/Hinglish", "Source proof"],
   },
   HIN: {
@@ -262,7 +569,14 @@ const COPY: Record<AppLanguage, LookupCopy> = {
     placeholder: "प्रक्रिया, सुरक्षा स्टेप, मशीन ऑपरेशन पूछें...",
     followUpPlaceholder: "अगला प्रश्न पूछें...",
     askButton: "पूछें",
+    voiceStartAction: "Voice shuru karein",
+    voiceStopRecordingAction: "Rok kar bhejein",
+    voiceCancelProcessingAction: "Radd karein",
+    voiceStopPlaybackAction: "Audio rokein",
+    voiceReady: "Ek baar tap karke bolna shuru karein. Dobara tap karke bhejein.",
     listening: "सुन रहा है। अभी बोलें।",
+    voiceProcessing: "Voice query process ho rahi hai. Radd karne ke liye tap karein.",
+    voicePlaying: "Voice jawab baj raha hai. Audio rokne ke liye tap karein.",
     conversation: "बातचीत",
     sources: "स्रोत",
     sourceDoc: "स्रोत दस्तावेज",
@@ -275,6 +589,10 @@ const COPY: Record<AppLanguage, LookupCopy> = {
     voiceError: "वॉइस क्वेरी नहीं चली। फिर से कोशिश करें।",
     queryError: "अभी बैकएंड से कनेक्ट नहीं हो पाया।",
     voiceUnsupported: "इस ब्राउजर में वॉइस इनपुट उपलब्ध नहीं है।",
+    newChat: "नई चैट",
+    recentChats: "पुरानी चैट",
+    noChats: "अभी कोई सेव चैट नहीं है।",
+    loadingChats: "सेव चैट लोड हो रही है...",
     features: ["वॉइस क्वेरी", "हिंदी/हिंग्लिश", "स्रोत प्रमाण"],
   },
   HING: {
@@ -283,7 +601,14 @@ const COPY: Record<AppLanguage, LookupCopy> = {
     placeholder: "Procedure, safety step, machine operation pucho...",
     followUpPlaceholder: "Next question pucho...",
     askButton: "Pucho",
+    voiceStartAction: "Voice start",
+    voiceStopRecordingAction: "Stop karke bhejo",
+    voiceCancelProcessingAction: "Cancel",
+    voiceStopPlaybackAction: "Audio stop",
+    voiceReady: "Ek tap se recording start hogi. Dobara tap se stop karke send hoga.",
     listening: "Listening. Ab bolo.",
+    voiceProcessing: "Voice query process ho rahi hai. Cancel tap karo.",
+    voicePlaying: "Voice answer chal raha hai. Audio stop tap karo.",
     conversation: "Conversation",
     sources: "Sources",
     sourceDoc: "Source Document",
@@ -296,6 +621,10 @@ const COPY: Record<AppLanguage, LookupCopy> = {
     voiceError: "Voice query fail hui. Dobara try karo.",
     queryError: "Abhi backend se connect nahi ho pa raha.",
     voiceUnsupported: "Is browser me voice input support nahi hai.",
+    newChat: "Nayi Chat",
+    recentChats: "Recent Chats",
+    noChats: "Abhi koi saved chat nahi hai.",
+    loadingChats: "Saved chats load ho rahi hain...",
     features: ["Voice query", "Hindi/Hinglish", "Source proof"],
   },
 };
@@ -355,13 +684,24 @@ function SiriRing({ animate = true }: { animate?: boolean }) {
 }
 
 export default function InformationLookup() {
+  const router = useRouter();
   const { user, language, setLanguage } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
-  const [isListening, setIsListening] = useState(false);
-  const [chatMessages, setChatMessages] = useState<
-    { role: string; content: string; citations?: CitationType[] }[]
+  const [voiceState, setVoiceState] = useState<VoiceState>("idle");
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [conversations, setConversations] = useState<
+    ConversationSummaryPayload[]
   >([]);
+  const [conversationScopeTab, setConversationScopeTab] =
+    useState<ConversationScope>("general");
+  const [activeConversationId, setActiveConversationId] = useState<
+    string | null
+  >(null);
+  const [isConversationLoading, setIsConversationLoading] = useState(false);
   const [activeCitation, setActiveCitation] = useState<CitationType | null>(
+    null,
+  );
+  const [activeProofTarget, setActiveProofTarget] = useState<string | null>(
     null,
   );
   const [pagePayload, setPagePayload] = useState<PagePayload | null>(null);
@@ -377,14 +717,30 @@ export default function InformationLookup() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const activeAudioUrlRef = useRef<string | null>(null);
+  const voiceAbortControllerRef = useRef<AbortController | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const initialQueryHandledRef = useRef(false);
+  const conversationsBootstrappedRef = useRef(false);
 
   const hasStarted = chatMessages.length > 0;
   const copy = COPY[language];
   const isIndicLayout = language !== "ENG";
+  const isListening = voiceState === "recording";
+  const isVoiceProcessing = voiceState === "processing";
+  const isVoicePlaying = voiceState === "playing";
   const pageImageUrl = normalizeApiAssetUrl(pagePayload?.page?.image_url);
-  const highlightBoxes = getHighlightBoxes(activeCitation, pagePayload);
+  const highlightBoxes = getHighlightBoxes(
+    activeCitation,
+    pagePayload,
+    activeProofTarget,
+  );
+  const sourceProofText = getSourceProofText(activeCitation, pagePayload);
+  const proofTextSegments = highlightProofText(
+    sourceProofText,
+    getProofHighlightPhrases(activeCitation, pagePayload),
+  );
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -394,6 +750,11 @@ export default function InformationLookup() {
     return () => {
       mediaRecorderRef.current?.stop();
       mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+      voiceAbortControllerRef.current?.abort();
+      activeAudioRef.current?.pause();
+      if (activeAudioUrlRef.current) {
+        URL.revokeObjectURL(activeAudioUrlRef.current);
+      }
     };
   }, []);
 
@@ -429,6 +790,52 @@ export default function InformationLookup() {
       cancelled = true;
     };
   }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setConversations([]);
+      setActiveConversationId(null);
+      setChatMessages([]);
+      conversationsBootstrappedRef.current = false;
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadConversationState = async () => {
+      try {
+        const items = await refreshConversations(conversationScopeTab);
+        if (cancelled) return;
+
+        if (conversationScopeTab !== "general") {
+          setActiveConversationId(null);
+          setChatMessages([]);
+          return;
+        }
+
+        const query = new URLSearchParams(window.location.search).get("q");
+        if (
+          !query &&
+          !conversationsBootstrappedRef.current &&
+          !activeConversationId &&
+          items[0]?.id
+        ) {
+          conversationsBootstrappedRef.current = true;
+          await loadConversation(items[0].id);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error(error);
+          setConversations([]);
+        }
+      }
+    };
+
+    void loadConversationState();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, conversationScopeTab]);
 
   const getRecordingMimeType = () => {
     if (
@@ -469,34 +876,193 @@ export default function InformationLookup() {
     bboxY1: "bbox_y1" in ev ? (ev.bbox_y1 ?? null) : null,
   });
 
-  const playAudioBase64 = async (audioBase64?: string) => {
-    if (!audioBase64) return;
+  const mapConversationMessage = (
+    message: ConversationMessagePayload,
+  ): ChatMessage => ({
+    id: message.id,
+    role: message.role,
+    content: message.content,
+    citations: (message.citations || []).map(mapCitationPayload),
+    createdAt: message.created_at,
+    responseMode: message.response_mode,
+  });
+
+  async function refreshConversations(
+    scope: ConversationScope,
+    preferredConversationId?: string | null,
+  ) {
+    if (!user?.id) return [];
 
     try {
-      const audio = new Audio(`data:audio/wav;base64,${audioBase64}`);
+      const payload = (await apiClient.get(
+        `/api/conversations?user_id=${encodeURIComponent(user.id)}&limit=12&scope=${scope}`,
+      )) as ConversationSummaryPayload[];
+      setConversations(payload);
+      if (scope === "general" && preferredConversationId) {
+        setActiveConversationId(preferredConversationId);
+      }
+      return payload;
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.includes("Backend unavailable")
+      ) {
+        console.warn(error.message);
+        return [];
+      }
+      console.error(error);
+      return [];
+    }
+  }
+
+  async function loadConversation(conversationId: string) {
+    if (!user?.id) return;
+
+    setIsConversationLoading(true);
+    try {
+      const payload = (await apiClient.get(
+        `/api/conversations/${conversationId}?user_id=${encodeURIComponent(user.id)}&scope=general`,
+      )) as ConversationDetailPayload;
+      const mappedMessages = payload.messages.map(mapConversationMessage);
+      setActiveConversationId(payload.conversation.id);
+      setChatMessages(mappedMessages);
+
+      const latestCitation = [...mappedMessages]
+        .reverse()
+        .find(
+          (message) =>
+            message.role === "assistant" && message.citations?.length,
+        )?.citations?.[0];
+
+      if (latestCitation) {
+        void loadCitation(latestCitation);
+      } else {
+        setActiveCitation(null);
+        setActiveProofTarget(null);
+        setPagePayload(null);
+      }
+    } finally {
+      setIsConversationLoading(false);
+    }
+  }
+
+  function startNewConversation() {
+    if (conversationScopeTab === "reader") {
+      const readerRevisionId =
+        conversations.find((item) => item.revision_id)?.revision_id ||
+        recentSops.find((item) => item.revision_id)?.revision_id;
+      if (readerRevisionId) {
+        router.push(`/operator/reader/${readerRevisionId}?page=1`);
+      }
+      return;
+    }
+
+    setActiveConversationId(null);
+    setChatMessages([]);
+    setSearchQuery("");
+    setActiveCitation(null);
+    setActiveProofTarget(null);
+    setPagePayload(null);
+    setPageImageSize(null);
+  }
+
+  const stopVoicePlayback = (nextState: VoiceState = "idle") => {
+    activeAudioRef.current?.pause();
+    activeAudioRef.current = null;
+    if (activeAudioUrlRef.current) {
+      URL.revokeObjectURL(activeAudioUrlRef.current);
+      activeAudioUrlRef.current = null;
+    }
+    setVoiceState((current) =>
+      current === "playing" || nextState !== "idle" ? nextState : current,
+    );
+  };
+
+  const getVoiceHelperText = () => {
+    if (isListening) return copy.listening;
+    if (isVoiceProcessing) return copy.voiceProcessing;
+    if (isVoicePlaying) return copy.voicePlaying;
+    return copy.voiceReady;
+  };
+
+  const getVoiceButtonLabel = () => {
+    if (isListening) return copy.voiceStopRecordingAction;
+    if (isVoiceProcessing) return copy.voiceCancelProcessingAction;
+    if (isVoicePlaying) return copy.voiceStopPlaybackAction;
+    return copy.voiceStartAction;
+  };
+
+  const playAudioBase64 = async (
+    audioBase64?: string,
+    audioMimeType = "audio/wav",
+  ) => {
+    if (!audioBase64) {
+      setVoiceState("idle");
+      return;
+    }
+
+    try {
+      const binaryString = window.atob(audioBase64);
+      const byteArray = new Uint8Array(binaryString.length);
+      for (let index = 0; index < binaryString.length; index += 1) {
+        byteArray[index] = binaryString.charCodeAt(index);
+      }
+
+      stopVoicePlayback();
+
+      const audioBlob = new Blob([byteArray], { type: audioMimeType });
+      const audioUrl = URL.createObjectURL(audioBlob);
+      activeAudioUrlRef.current = audioUrl;
+
+      const audio = new Audio(audioUrl);
+      audio.onended = () => stopVoicePlayback();
+      audio.onerror = () => stopVoicePlayback();
+      activeAudioRef.current = audio;
+      setVoiceState("playing");
       await audio.play();
     } catch (error) {
+      setVoiceState("idle");
       console.error("Voice playback failed", error);
     }
   };
 
-  const submitVoiceQuery = async (audioBlob: Blob) => {
+  const submitVoiceQuery = async (
+    audioBlob: Blob,
+    signal?: AbortSignal,
+  ) => {
     const formData = new FormData();
-    formData.append("audio", audioBlob, "voice-query.webm");
+    const mimeType = audioBlob.type || "audio/webm";
+    const fileExtension =
+      mimeType === "audio/mp4"
+        ? "mp4"
+        : mimeType === "audio/wav"
+          ? "wav"
+          : "webm";
+    formData.append("audio", audioBlob, `voice-query.${fileExtension}`);
     formData.append("language", "auto");
+    formData.append("speaker", "suhani");
+    if (user?.id) {
+      formData.append("user_id", user.id);
+    }
+    if (activeConversationId) {
+      formData.append("conversation_id", activeConversationId);
+    }
+    formData.append("chat_scope", "general");
 
     const response = await fetch(`${API_BASE_URL}/api/voice`, {
       method: "POST",
       body: formData,
+      signal,
     });
 
     if (!response.ok) {
-      throw new Error(`Voice pipeline error: ${response.status}`);
+      const detail = await response.text();
+      throw new Error(`Voice pipeline error: ${response.status} ${detail}`);
     }
 
     const payload = (await response.json()) as VoiceApiResponse;
-    if (!payload.user_text?.trim()) {
-      throw new Error("No transcript returned");
+    if (!payload.user_text?.trim() && !payload.assistant_text?.trim()) {
+      throw new Error("No voice response returned");
     }
     return payload;
   };
@@ -509,6 +1075,8 @@ export default function InformationLookup() {
       alert(copy.voiceUnsupported);
       return;
     }
+
+    stopVoicePlayback("idle");
 
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const mimeType = getRecordingMimeType();
@@ -527,11 +1095,10 @@ export default function InformationLookup() {
     };
 
     recorder.onstart = () => {
-      setIsListening(true);
+      setVoiceState("recording");
     };
 
     recorder.onstop = async () => {
-      setIsListening(false);
       mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
       mediaStreamRef.current = null;
 
@@ -539,31 +1106,59 @@ export default function InformationLookup() {
         type: recorder.mimeType || "audio/webm",
       });
       audioChunksRef.current = [];
-      if (!audioBlob.size) return;
+      if (!audioBlob.size) {
+        setVoiceState("idle");
+        return;
+      }
 
+      setVoiceState("processing");
       setIsQuerying(true);
+      voiceAbortControllerRef.current = new AbortController();
       try {
-        const voiceResponse = await submitVoiceQuery(audioBlob);
+        const voiceResponse = await submitVoiceQuery(
+          audioBlob,
+          voiceAbortControllerRef.current.signal,
+        );
         const citations = (voiceResponse.citations || []).map(
           mapCitationPayload,
         );
+        const nextConversationId =
+          voiceResponse.conversation_id || activeConversationId || null;
 
-        setChatMessages((prev) => [
-          ...prev,
-          { role: "user", content: voiceResponse.user_text },
-          {
+        setChatMessages((prev) => {
+          const next = [...prev];
+          if (voiceResponse.user_text?.trim()) {
+            next.push({ role: "user", content: voiceResponse.user_text });
+          }
+          next.push({
             role: "assistant",
             content:
-              voiceResponse.assistant_tts_text || voiceResponse.assistant_text,
+              voiceResponse.assistant_tts_text ||
+              voiceResponse.assistant_text ||
+              copy.voiceError,
             citations: citations.length > 0 ? citations : undefined,
-          },
-        ]);
+          });
+          return next;
+        });
+        if (nextConversationId) {
+          setActiveConversationId(nextConversationId);
+          void refreshConversations("general", nextConversationId);
+        }
 
         if (citations.length > 0) {
           void loadCitation(citations[0]);
         }
-        await playAudioBase64(voiceResponse.audio_base64);
+        await playAudioBase64(
+          voiceResponse.audio_base64,
+          voiceResponse.audio_mime_type,
+        );
       } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+          setVoiceState("idle");
+          return;
+        }
+
+        setVoiceState("idle");
         console.error(error);
         setChatMessages((prev) => [
           ...prev,
@@ -573,7 +1168,9 @@ export default function InformationLookup() {
           },
         ]);
       } finally {
+        voiceAbortControllerRef.current = null;
         setIsQuerying(false);
+        setVoiceState((current) => (current === "processing" ? "idle" : current));
       }
     };
 
@@ -586,16 +1183,31 @@ export default function InformationLookup() {
       return;
     }
 
+    if (isVoiceProcessing) {
+      voiceAbortControllerRef.current?.abort();
+      return;
+    }
+
+    if (isVoicePlaying) {
+      stopVoicePlayback();
+      return;
+    }
+
     try {
       await startVoiceRecording();
     } catch (error) {
+      setVoiceState("idle");
       console.error(error);
     }
   };
 
-  const loadCitation = async (citation: CitationType) => {
+  const loadCitation = async (
+    citation: CitationType,
+    proofTarget?: string | null,
+  ) => {
     if (!citation.chunkId) return;
     setActiveCitation(citation);
+    setActiveProofTarget(proofTarget || null);
     setIsPageLoading(true);
     setPageImageSize(null);
 
@@ -656,10 +1268,14 @@ export default function InformationLookup() {
         language: requestLanguageOverride ?? (language === "ENG" ? "en" : "hi"),
         role: "operator",
         user_id: user?.id,
+        conversation_id: activeConversationId,
+        chat_scope: "general",
         top_k: 5,
       })) as QueryApiResponse;
 
       const citations = (response.evidence || []).map(mapCitationPayload);
+      const nextConversationId =
+        response.conversation_id || activeConversationId || null;
       setChatMessages((prev) => [
         ...prev,
         {
@@ -668,6 +1284,10 @@ export default function InformationLookup() {
           citations: citations.length > 0 ? citations : undefined,
         },
       ]);
+      if (nextConversationId) {
+        setActiveConversationId(nextConversationId);
+        void refreshConversations("general", nextConversationId);
+      }
 
       if (citations.length > 0) {
         void loadCitation(citations[0]);
@@ -691,7 +1311,7 @@ export default function InformationLookup() {
       documentCode: citation.documentCode,
       section: citation.sectionTitle,
     });
-    void loadCitation(citation);
+    void loadCitation(citation, null);
   };
 
   const openRecentDoc = (
@@ -699,6 +1319,16 @@ export default function InformationLookup() {
       ? T
       : never,
   ) => {
+    if (doc.revision_id) {
+      const params = new URLSearchParams({
+        page: "1",
+        code: doc.code || "",
+        title: doc.title || "",
+      });
+      router.push(`/operator/reader/${doc.revision_id}?${params.toString()}`);
+      return;
+    }
+
     const docType = getDocTypeMeta(doc.document_type).label;
     const revisionLabel = doc.revision_label
       ? ` revision ${doc.revision_label}`
@@ -781,10 +1411,116 @@ export default function InformationLookup() {
             "Machine safety SOP ko 5 points mein samjhao.",
             "Latest SOP revision me kya change hua hai?",
           ];
+  const canOpenReaderFromTab = Boolean(
+    conversations.find((item) => item.revision_id)?.revision_id ||
+      recentSops.find((item) => item.revision_id)?.revision_id,
+  );
+
+  const conversationStrip = (
+    <div className="mb-4 rounded-[14px] border border-[#d2d8e0] bg-white p-3 shadow-[0px_6px_18px_rgba(0,25,168,0.05)]">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
+            {copy.recentChats}
+          </p>
+          <p className="mt-1 text-xs text-muted">
+            {isConversationLoading
+              ? copy.loadingChats
+                : conversations.length > 0
+                  ? `${conversations.length} ${conversationScopeTab === "reader" ? "reader" : "general"} thread(s)`
+                : conversationScopeTab === "reader"
+                  ? "No reader threads yet. General chat history is in the General tab."
+                  : copy.noChats}
+          </p>
+          <div className="mt-2 inline-flex items-center rounded-[10px] border border-border bg-[#f5f8fc] p-1">
+            {(["general", "reader"] as ConversationScope[]).map((scope) => (
+              <button
+                key={scope}
+                type="button"
+                onClick={() => setConversationScopeTab(scope)}
+                className={`rounded-[8px] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] transition-colors ${
+                  conversationScopeTab === scope
+                    ? "bg-primary text-white"
+                    : "text-muted hover:text-foreground"
+                }`}
+              >
+                {scope === "general" ? "General" : "Reader"}
+              </button>
+            ))}
+          </div>
+        </div>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={startNewConversation}
+          disabled={
+            isQuerying || (conversationScopeTab === "reader" && !canOpenReaderFromTab)
+          }
+        >
+          {conversationScopeTab === "general" ? copy.newChat : "Open Reader"}
+        </Button>
+      </div>
+
+      <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+        {conversations.length > 0 ? (
+          conversations.map((conversation) => (
+            <button
+              key={conversation.id}
+              type="button"
+              onClick={() => {
+                if (conversationScopeTab === "reader") {
+                  if (!conversation.revision_id) return;
+                  const params = new URLSearchParams({
+                    page: "1",
+                    conversation_id: conversation.id,
+                  });
+                  router.push(
+                    `/operator/reader/${conversation.revision_id}?${params.toString()}`,
+                  );
+                  return;
+                }
+                void loadConversation(conversation.id);
+              }}
+              className={`min-w-[220px] rounded-[12px] border px-3 py-2 text-left transition-colors ${
+                activeConversationId === conversation.id
+                  ? "border-primary bg-[#eef3ff]"
+                  : "border-border bg-[#f8fafd] hover:border-[#9fb0d0] hover:bg-white"
+              } ${
+                conversationScopeTab === "reader" && !conversation.revision_id
+                  ? "cursor-not-allowed opacity-60"
+                  : ""
+              }`}
+            >
+              <p className="truncate text-sm font-semibold text-foreground">
+                {conversation.title}
+              </p>
+              <p className="mt-1 line-clamp-2 text-xs text-muted">
+                {conversation.preview ||
+                  (conversationScopeTab === "reader"
+                    ? "Open in Reader workspace to continue."
+                    : "Ready to continue this conversation.")}
+              </p>
+              <div className="mt-2 flex items-center justify-between text-[11px] text-muted">
+                <span>{conversation.message_count} msg</span>
+                <span>{formatDateLabel(conversation.last_message_at)}</span>
+              </div>
+            </button>
+          ))
+        ) : (
+          <div className="rounded-[12px] border border-dashed border-border px-3 py-2 text-xs text-muted">
+            {conversationScopeTab === "reader"
+              ? "No reader threads yet. Open Reader from a document to create one."
+              : copy.noChats}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 
   return (
     <OperatorLayout>
       <div className="min-h-[calc(100vh-210px)]">
+        {conversationStrip}
         {!hasStarted ? (
           <div className="grid gap-4 xl:grid-cols-[1.24fr_0.96fr]">
             <section className="rounded-[20px] border border-[#d2d8e0] bg-[#f4f7fb] p-4 shadow-[0px_8px_20px_rgba(0,25,168,0.06)] md:p-5">
@@ -1002,14 +1738,19 @@ export default function InformationLookup() {
                   <div className="mt-2.5 flex items-center justify-between gap-2">
                     <button
                       onClick={handleVoiceInput}
+                      disabled={isQuerying && !isVoiceProcessing}
                       className={`inline-flex items-center gap-2 rounded-[8px] border px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] ${
                         isListening
                           ? "border-danger bg-danger text-white"
-                          : "border-border bg-white text-muted hover:border-primary hover:text-primary"
+                          : isVoiceProcessing
+                            ? "border-[#ffd329] bg-[#ffd329] text-[#232323]"
+                            : isVoicePlaying
+                              ? "border-secondary bg-secondary text-white"
+                              : "border-border bg-white text-muted hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
                       }`}
                     >
-                      <SiriRing animate={isListening} />
-                      Voice
+                      <SiriRing animate={voiceState !== "idle"} />
+                      {getVoiceButtonLabel()}
                     </button>
                     <Button
                       variant="primary"
@@ -1021,11 +1762,19 @@ export default function InformationLookup() {
                       {copy.askButton}
                     </Button>
                   </div>
-                  {isListening ? (
-                    <p className="mt-2 text-xs font-medium text-danger">
-                      {copy.listening}
-                    </p>
-                  ) : null}
+                  <p
+                    className={`mt-2 text-xs font-medium ${
+                      isListening
+                        ? "text-danger"
+                        : isVoiceProcessing
+                          ? "text-[#8a6d00]"
+                          : isVoicePlaying
+                            ? "text-secondary"
+                            : "text-muted"
+                    }`}
+                  >
+                    {getVoiceHelperText()}
+                  </p>
                 </div>
 
                 <div className="mt-3 grid gap-2 sm:grid-cols-3">
@@ -1066,6 +1815,14 @@ export default function InformationLookup() {
                     ? `${recentSops[0].title} | Rev ${recentSops[0].revision_label || "-"}`
                     : "No approved revision found yet."}
                 </p>
+                {recentSops[0]?.revision_id ? (
+                  <button
+                    onClick={() => openRecentDoc(recentSops[0])}
+                    className="mt-2 rounded-[8px] border border-primary/20 bg-primary/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-primary transition-colors hover:border-primary hover:bg-primary hover:text-white"
+                  >
+                    Open Reader
+                  </button>
+                ) : null}
               </div>
             </section>
           </div>
@@ -1118,9 +1875,63 @@ export default function InformationLookup() {
                               {copy.assistantTag}
                             </span>
                           </div>
-                          <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                            {msg.content}
-                          </p>
+                          <div className="space-y-2">
+                            {parseAnswerParagraphs(
+                              msg.content,
+                              msg.citations,
+                            ).map((paragraph, paragraphIndex) =>
+                              paragraph.primaryCitation ? (
+                                <button
+                                  key={`${idx}-${paragraphIndex}`}
+                                  type="button"
+                                  onClick={() => {
+                                    const citation =
+                                      paragraph.primaryCitation as CitationType;
+                                    trackEvent("ui.citation_opened", {
+                                      documentCode: citation.documentCode,
+                                      section: citation.sectionTitle,
+                                    });
+                                    void loadCitation(
+                                      citation,
+                                      paragraph.proofText,
+                                    );
+                                  }}
+                                  onMouseDown={(event) =>
+                                    event.preventDefault()
+                                  }
+                                  className="block w-full rounded-[10px] border border-transparent px-2 py-1.5 text-left transition-colors hover:border-[#c8d2e5] hover:bg-[#f7faff]"
+                                >
+                                  <span className="text-sm leading-relaxed text-foreground">
+                                    {paragraph.segments.map(
+                                      (segment, segmentIndex) =>
+                                        segment.isCitation &&
+                                        segment.citation ? (
+                                          <span
+                                            key={`${idx}-${paragraphIndex}-${segmentIndex}`}
+                                            className="rounded-[4px] bg-[#e7ebff] px-1 py-0.5 text-[11px] font-semibold text-primary"
+                                          >
+                                            {segment.text}
+                                          </span>
+                                        ) : (
+                                          <React.Fragment
+                                            key={`${idx}-${paragraphIndex}-${segmentIndex}`}
+                                          >
+                                            {segment.text}
+                                          </React.Fragment>
+                                        ),
+                                    )}
+                                  </span>
+                                </button>
+                              ) : (
+                                <p
+                                  key={`${idx}-${paragraphIndex}`}
+                                  className="px-2 text-sm leading-relaxed text-foreground"
+                                >
+                                  {paragraph.text}
+                                </p>
+                              ),
+                            )}
+                          </div>
                           {msg.citations && msg.citations.length > 0 ? (
                             <div className="mt-3 border-t border-border/60 pt-2.5">
                               <p className="mb-2 text-xs font-semibold uppercase tracking-[0.1em] text-muted">
@@ -1155,9 +1966,11 @@ export default function InformationLookup() {
                   <div className="flex justify-start">
                     <div className="rounded-[14px] border border-border bg-white px-3 py-2.5">
                       <div className="flex items-center gap-2">
-                        <SiriRing />
+                        <SiriRing animate={voiceState !== "idle"} />
                         <span className="text-xs font-medium text-muted">
-                          Generating response...
+                          {isVoiceProcessing
+                            ? copy.voiceProcessing
+                            : "Generating response..."}
                         </span>
                       </div>
                     </div>
@@ -1178,10 +1991,16 @@ export default function InformationLookup() {
                   />
                   <button
                     onClick={handleVoiceInput}
+                    disabled={isQuerying && !isVoiceProcessing}
+                    title={getVoiceHelperText()}
                     className={`inline-flex items-center justify-center rounded-[6px] border px-2 ${
                       isListening
                         ? "border-danger bg-danger text-white"
-                        : "border-border bg-white text-muted hover:border-primary hover:text-primary"
+                        : isVoiceProcessing
+                          ? "border-[#ffd329] bg-[#ffd329] text-[#232323]"
+                          : isVoicePlaying
+                            ? "border-secondary bg-secondary text-white"
+                            : "border-border bg-white text-muted hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
                     }`}
                   >
                     <svg
@@ -1288,7 +2107,7 @@ export default function InformationLookup() {
                                 ? highlightBoxes.map((box, index) => (
                                     <div
                                       key={`${activeCitation?.chunkId || "highlight"}-${index}`}
-                                      className="pointer-events-none absolute rounded-[6px] border-2 border-[#ffcf00] bg-[rgba(255,207,0,0.24)] shadow-[0_0_0_2px_rgba(0,25,168,0.12)]"
+                                      className="pointer-events-none absolute rounded-[10px] border-2 border-[#7c3aed] bg-[rgba(124,58,237,0.18)] shadow-[0_0_0_2px_rgba(124,58,237,0.14),0_8px_24px_rgba(124,58,237,0.18)]"
                                       style={{
                                         left: `${(box.left / pageImageSize.width) * 100}%`,
                                         top: `${(box.top / pageImageSize.height) * 100}%`,
@@ -1303,21 +2122,36 @@ export default function InformationLookup() {
                         </div>
                       ) : null}
 
-                      <div className="rounded-[12px] border border-warning/30 bg-warning-light p-3">
-                        <div className="mb-2 flex items-center gap-2">
-                          <span className="rounded-[4px] bg-warning px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#3f3100]">
-                            {copy.chunkTag}
-                          </span>
-                          {activeCitation?.sectionTitle ? (
-                            <span className="text-xs font-medium text-[#5b4700]">
-                              {activeCitation.sectionTitle}
+                      {!pageImageUrl || highlightBoxes.length === 0 ? (
+                        <div className="rounded-[12px] border border-warning/30 bg-warning-light p-3">
+                          <div className="mb-2 flex items-center gap-2">
+                            <span className="rounded-[4px] bg-warning px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#3f3100]">
+                              {copy.sourceProofLabel}
                             </span>
-                          ) : null}
+                            {activeCitation?.sectionTitle ? (
+                              <span className="text-xs font-medium text-[#5b4700]">
+                                {activeCitation.sectionTitle}
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="whitespace-pre-wrap text-sm leading-relaxed text-[#352e16]">
+                            {proofTextSegments.map((segment, index) =>
+                              segment.highlighted ? (
+                                <mark
+                                  key={`proof-${index}`}
+                                  className="rounded-[3px] bg-[#ffeb70] px-0.5 text-[#2b2100]"
+                                >
+                                  {segment.text}
+                                </mark>
+                              ) : (
+                                <React.Fragment key={`proof-${index}`}>
+                                  {segment.text}
+                                </React.Fragment>
+                              ),
+                            )}
+                          </p>
                         </div>
-                        <p className="whitespace-pre-wrap text-sm leading-relaxed text-[#352e16]">
-                          {pagePayload.page.raw_text}
-                        </p>
-                      </div>
+                      ) : null}
                     </div>
                   </div>
                 ) : (

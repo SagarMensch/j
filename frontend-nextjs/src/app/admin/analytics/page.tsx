@@ -64,6 +64,26 @@ type ReportingPayload = {
   }[];
 };
 
+type GuardrailIncidentsPayload = {
+  incidents: {
+    incident_id: string;
+    actor_user_id: string | null;
+    actor_name: string | null;
+    actor_role: string | null;
+    category: string;
+    reason: string | null;
+    severity: string;
+    channel: string | null;
+    query_excerpt: string | null;
+    matched_terms: string[];
+    created_at: string;
+  }[];
+  summary: {
+    total: number;
+    counts_by_category: Record<string, number>;
+  };
+};
+
 function formatDate(value: string | null) {
   if (!value) return "-";
   const date = new Date(value);
@@ -93,6 +113,9 @@ export default function AdminAnalytics() {
   const [filterStatus, setFilterStatus] = useState("all");
   const [readiness, setReadiness] = useState<ReadinessPayload | null>(null);
   const [reporting, setReporting] = useState<ReportingPayload | null>(null);
+  const [incidents, setIncidents] = useState<GuardrailIncidentsPayload | null>(
+    null,
+  );
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -110,15 +133,18 @@ export default function AdminAnalytics() {
           scope: "live",
           role: user.role,
         });
-        const [readinessResponse, reportingResponse] = await Promise.all([
+        const [readinessResponse, reportingResponse, incidentsResponse] =
+          await Promise.all([
           apiClient.get(`/api/admin/readiness/overview?user_id=${user.id}`),
           apiClient.get(`/api/admin/reporting/overview?user_id=${user.id}`),
+          apiClient.get(`/api/admin/guardrail/incidents?user_id=${user.id}`),
         ]);
 
         if (!isMounted) return;
 
         setReadiness(readinessResponse as ReadinessPayload);
         setReporting(reportingResponse as ReportingPayload);
+        setIncidents(incidentsResponse as GuardrailIncidentsPayload);
         setError("");
       } catch (err) {
         if (!isMounted) return;
@@ -318,6 +344,67 @@ export default function AdminAnalytics() {
                       <span className="text-sm font-medium text-primary">
                         {query.count}
                       </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </Card>
+
+            <Card title="Guardrail Incidents" className="!p-0">
+              <div className="border-b border-border bg-muted-light px-4 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-foreground">
+                    Blocked risky or abusive requests
+                  </p>
+                  <Badge variant="danger">
+                    {incidents?.summary.total || 0} recent
+                  </Badge>
+                </div>
+              </div>
+              <div className="divide-y divide-border">
+                {(incidents?.incidents || []).length === 0 ? (
+                  <div className="p-4 text-sm text-muted">
+                    No guardrail incidents recorded yet.
+                  </div>
+                ) : (
+                  (incidents?.incidents || []).slice(0, 10).map((incident) => (
+                    <div
+                      key={incident.incident_id}
+                      className="flex items-start justify-between gap-3 px-4 py-3"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge
+                            variant={
+                              incident.severity === "high"
+                                ? "danger"
+                                : "warning"
+                            }
+                          >
+                            {incident.severity}
+                          </Badge>
+                          <Badge variant="default">{incident.category}</Badge>
+                          <span className="text-xs text-muted">
+                            {incident.channel || "unknown channel"}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-sm text-foreground">
+                          {incident.query_excerpt || "No excerpt available"}
+                        </p>
+                        <p className="mt-1 text-xs text-muted">
+                          Actor: {incident.actor_name || incident.actor_user_id || "anonymous"}{" "}
+                          {incident.actor_role ? `| ${incident.actor_role}` : ""}{" "}
+                          | {formatDate(incident.created_at)}
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
+                          Reason
+                        </p>
+                        <p className="mt-1 text-xs text-foreground">
+                          {incident.reason || "policy"}
+                        </p>
+                      </div>
                     </div>
                   ))
                 )}

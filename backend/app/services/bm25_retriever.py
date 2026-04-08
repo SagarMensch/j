@@ -14,13 +14,11 @@ class BM25Retriever:
         self.bm25 = None
         self.chunk_metadata = []
 
-    def load_chunks(self, query: str = None):
+    def load_chunks(self):
         where_clause = """
             WHERE dc.content IS NOT NULL AND length(dc.content) > 30
               AND dr.is_latest_approved = true
         """
-        params = {}
-
         query_sql = f"""
             SELECT
                 dc.id::text as chunk_id,
@@ -46,7 +44,7 @@ class BM25Retriever:
         """
 
         with engine.connect() as conn:
-            result = conn.execute(text(query_sql), params)
+            result = conn.execute(text(query_sql))
 
             rows = result.mappings().all()
 
@@ -69,8 +67,16 @@ class BM25Retriever:
         tokens = text.split()
         return [t for t in tokens if len(t) > 1]
 
-    def search(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
-        self.load_chunks(query)
+    def search(
+        self,
+        query: str,
+        top_k: int = 5,
+        revision_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        # Build BM25 index once and reuse until an explicit refresh is requested.
+        # refresh_bm25_index() is called by ingestion and purge endpoints.
+        if self.bm25 is None or not self.chunks:
+            self.load_chunks()
 
         if not self.bm25 or not self.chunks:
             return []
@@ -79,12 +85,18 @@ class BM25Retriever:
 
         scores = self.bm25.get_scores(query_tokens)
 
-        top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:top_k]
+        top_indices = sorted(
+            range(len(scores)),
+            key=lambda i: scores[i],
+            reverse=True,
+        )
 
         results = []
         for idx in top_indices:
+            meta = self.chunk_metadata[idx]
+            if revision_id and meta.get("revision_id") != revision_id:
+                continue
             if scores[idx] > 0:
-                meta = self.chunk_metadata[idx]
                 results.append({
                     "chunk_id": meta["chunk_id"],
                     "document_code": meta["document_code"],
@@ -103,6 +115,8 @@ class BM25Retriever:
                     "bbox_y1": meta.get("bbox_y1"),
                     "bm25_score": round(scores[idx], 4)
                 })
+            if len(results) >= top_k:
+                break
 
         return results
 

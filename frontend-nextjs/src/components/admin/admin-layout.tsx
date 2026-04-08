@@ -9,13 +9,14 @@ import {
   AnalyticsBarsIcon,
   DashboardBlocksIcon,
   DocumentStackIcon,
+  LookupNodesIcon,
   NotificationGridIcon,
   SettingsMatrixIcon,
   UsersClusterIcon,
 } from "@/components/ui/icons";
 
 interface NavItem {
-  key: "dashboard" | "analytics" | "users" | "documents" | "settings";
+  key: "dashboard" | "analytics" | "graph" | "users" | "documents" | "settings";
   href: string;
   icon: React.ReactNode;
 }
@@ -23,6 +24,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { key: "dashboard", href: "/admin", icon: <DashboardBlocksIcon /> },
   { key: "analytics", href: "/admin/analytics", icon: <AnalyticsBarsIcon /> },
+  { key: "graph", href: "/admin/graph", icon: <LookupNodesIcon /> },
   { key: "users", href: "/admin/users", icon: <UsersClusterIcon /> },
   { key: "documents", href: "/admin/documents", icon: <DocumentStackIcon /> },
   { key: "settings", href: "/admin/settings", icon: <SettingsMatrixIcon /> },
@@ -44,6 +46,7 @@ const COPY: Record<
     nav: {
       dashboard: "Dashboard",
       analytics: "Analytics",
+      graph: "Knowledge Graph",
       users: "Users",
       documents: "Documents",
       settings: "Settings",
@@ -56,6 +59,7 @@ const COPY: Record<
     nav: {
       dashboard: "Dashboard",
       analytics: "Analytics",
+      graph: "Knowledge Graph",
       users: "Users",
       documents: "Documents",
       settings: "Settings",
@@ -68,6 +72,7 @@ const COPY: Record<
     nav: {
       dashboard: "Dashboard",
       analytics: "Analytics",
+      graph: "Knowledge Graph",
       users: "Users",
       documents: "Documents",
       settings: "Settings",

@@ -6,8 +6,9 @@ from sqlalchemy import text
 
 from app.core.config import get_settings
 from app.db.postgres import engine
-from app.services.bm25_retriever import get_bm25_retriever, refresh_bm25_index
+from app.services.bm25_retriever import get_bm25_retriever
 from app.services.embedding_service import embed_query
+from app.services.reranker import rerank_evidence
 
 
 INSERT_EVENT_SQL = text("""
@@ -60,6 +61,52 @@ SEMANTIC_SQL = text("""
 """)
 
 
+SEMANTIC_SQL_FOR_REVISION = text(
+    """
+    SELECT
+        dc.id::text AS chunk_id,
+        d.code AS document_code,
+        d.title AS document_title,
+        dr.id::text AS revision_id,
+        dr.revision_label AS revision_label,
+        dc.page_start,
+        dc.page_end,
+        dc.citation_label,
+        dc.section_title,
+        dc.block_ids,
+        dc.content,
+        dc.bbox_x0,
+        dc.bbox_y0,
+        dc.bbox_x1,
+        dc.bbox_y1,
+        (1 - (dc.embedding <=> CAST(:query_embedding AS vector))) AS semantic_score
+    FROM document_chunks dc
+    JOIN document_revisions dr ON dc.revision_id = dr.id
+    JOIN documents d ON dr.document_id = d.id
+    WHERE dc.embedding IS NOT NULL
+      AND dr.is_latest_approved = true
+      AND dr.id = CAST(:revision_id AS uuid)
+    ORDER BY dc.embedding <=> CAST(:query_embedding AS vector)
+    LIMIT :k
+    """
+)
+
+
+LINE_RANGE_SQL = text(
+    """
+    SELECT
+        dc.id::text AS chunk_id,
+        MIN(eb.reading_order) AS line_start,
+        MAX(eb.reading_order) AS line_end
+    FROM document_chunks dc
+    LEFT JOIN LATERAL jsonb_array_elements_text(COALESCE(dc.block_ids, '[]'::jsonb)) AS bid(block_id) ON true
+    LEFT JOIN extracted_blocks eb ON eb.id::text = bid.block_id
+    WHERE dc.id = ANY(CAST(:chunk_ids AS uuid[]))
+    GROUP BY dc.id
+    """
+)
+
+
 def _normalize_scores(raw_scores: dict[str, float]) -> dict[str, float]:
     if not raw_scores:
         return {}
@@ -80,7 +127,12 @@ class SOPRetriever:
         self.settings = get_settings()
         self.bm25 = get_bm25_retriever()
 
-    def _semantic_search(self, query_text: str, k: int) -> list[dict[str, Any]]:
+    def _semantic_search(
+        self,
+        query_text: str,
+        k: int,
+        revision_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         try:
             query_vec = embed_query(query_text)
         except Exception as e:
@@ -88,15 +140,45 @@ class SOPRetriever:
             return []
 
         with engine.connect() as conn:
+            sql = SEMANTIC_SQL_FOR_REVISION if revision_id else SEMANTIC_SQL
             rows = conn.execute(
-                SEMANTIC_SQL,
-                {
-                    "query_embedding": _to_vector_literal(query_vec),
-                    "k": k,
-                },
+                sql,
+                {"query_embedding": _to_vector_literal(query_vec), "k": k, "revision_id": revision_id},
             ).mappings().all()
 
         return [dict(row) for row in rows]
+
+    def _attach_line_ranges(self, evidence: list[dict[str, Any]]) -> None:
+        if not evidence:
+            return
+
+        chunk_ids = [item.get("chunk_id") for item in evidence if item.get("chunk_id")]
+        if not chunk_ids:
+            return
+
+        with engine.connect() as conn:
+            rows = conn.execute(
+                LINE_RANGE_SQL,
+                {"chunk_ids": chunk_ids},
+            ).mappings().all()
+
+        range_map: dict[str, tuple[int | None, int | None]] = {}
+        for row in rows:
+            chunk_id = row.get("chunk_id")
+            if not chunk_id:
+                continue
+            line_start = row.get("line_start")
+            line_end = row.get("line_end")
+            start_value = int(line_start) if line_start is not None else None
+            end_value = int(line_end) if line_end is not None else None
+            if start_value is not None and end_value is None:
+                end_value = start_value
+            range_map[chunk_id] = (start_value, end_value)
+
+        for item in evidence:
+            start_value, end_value = range_map.get(item.get("chunk_id"), (None, None))
+            item["line_start"] = start_value
+            item["line_end"] = end_value
 
     def _write_event(
         self,
@@ -134,14 +216,26 @@ class SOPRetriever:
             return None
         return event_id
 
-    def query(self, *, query_text: str, language: str, role: str | None, user_id: str | None, top_k: int = 5) -> dict[str, Any]:
+    def query(
+        self,
+        *,
+        query_text: str,
+        language: str,
+        role: str | None,
+        user_id: str | None,
+        top_k: int = 5,
+        revision_id: str | None = None,
+    ) -> dict[str, Any]:
         started = time.perf_counter()
 
         k = max(1, min(top_k * 2, 20))
 
         try:
-            self.bm25.load_chunks(query_text)
-            lexical = self.bm25.search(query_text, k * 2)
+            lexical = self.bm25.search(
+                query_text,
+                k * 2,
+                revision_id=revision_id,
+            )
         except Exception as e:
             print(f"BM25 search failed: {e}")
             import traceback
@@ -149,7 +243,11 @@ class SOPRetriever:
             lexical = []
 
         try:
-            semantic = self._semantic_search(query_text, k * 2)
+            semantic = self._semantic_search(
+                query_text,
+                k * 2,
+                revision_id=revision_id,
+            )
         except Exception as e:
             print(f"Semantic search failed: {e}")
             semantic = []
@@ -217,6 +315,8 @@ class SOPRetriever:
                 "bbox_y0": c.get("bbox_y0"),
                 "bbox_x1": c.get("bbox_x1"),
                 "bbox_y1": c.get("bbox_y1"),
+                "line_start": None,
+                "line_end": None,
                 "scores": {
                     "lexical": round(l_norm, 6),
                     "semantic": round(s_norm, 6),
@@ -224,8 +324,13 @@ class SOPRetriever:
                 },
             })
 
-        evidence.sort(key=lambda x: x["scores"]["final"], reverse=True)
-        evidence = evidence[:top_k]
+        evidence, reranker_diagnostics = rerank_evidence(
+            query_text=query_text,
+            evidence=evidence,
+            top_k=top_k,
+            mode=self.settings.RETRIEVAL_RERANKER_MODE,
+        )
+        self._attach_line_ranges(evidence)
 
         confidence = evidence[0]["scores"]["final"] if evidence else 0.0
         latency_ms = int((time.perf_counter() - started) * 1000)
@@ -252,6 +357,8 @@ class SOPRetriever:
                 "lexical_hits": len(lexical),
                 "semantic_hits": len(semantic),
                 "candidates": len(candidates),
+                "revision_filter": revision_id,
+                "reranker": reranker_diagnostics,
             }
         }
 

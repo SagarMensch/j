@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
     OPENROUTER_API_KEY: str = ""
+    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1/chat/completions"
+    OPENROUTER_VLM_MODEL: str = "nvidia/nemotron-nano-12b-v2-vl:free"
+
+    MISTRAL_API_KEY: str = ""
+    MISTRAL_BASE_URL: str = "https://api.mistral.ai/v1"
+    MISTRAL_MODEL: str = "mistral-small-latest"
 
     SARVAM_API_KEY: str = ""
     SARVAM_STT_URL: str = "https://api.sarvam.ai/speech-to-text"
@@ -48,15 +54,22 @@ class Settings(BaseSettings):
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_COLLECTION: str = "sop_documents"
     EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
+    HF_TOKEN: str = ""
 
     CONFIDENCE_THRESHOLD: float = 0.65
     MAX_CONTEXT_CHUNKS: int = 5
+    RETRIEVAL_RERANKER_MODE: str = "light"
+    RETRIEVAL_RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    RETRIEVAL_RERANKER_BATCH_SIZE: int = 12
 
     RAW_DATA_DIR: str = str(BACKEND_DIR / "data" / "raw")
     PROCESSED_DATA_DIR: str = str(BACKEND_DIR / "data" / "processed")
     SOP_OCR_MODE: str = "auto"
     SOP_PDF_RENDER_DPI: int = 150
     SOP_OCR_DPI: int = 200
+    SOP_OCR_MIN_TEXT_CHARS: int = 160
+    SOP_OCR_CONFIDENCE_FLOOR: float = 0.72
+    SOP_VLM_PAGE_LIMIT: int = 12
 
     @computed_field
     @property
@@ -71,6 +84,16 @@ class Settings(BaseSettings):
     @property
     def has_voice_credentials(self) -> bool:
         return bool(self.GROQ_API_KEY and self.SARVAM_API_KEY)
+
+    @computed_field
+    @property
+    def has_openrouter_credentials(self) -> bool:
+        return bool(self.OPENROUTER_API_KEY)
+
+    @computed_field
+    @property
+    def has_mistral_credentials(self) -> bool:
+        return bool(self.MISTRAL_API_KEY)
 
     @computed_field
     @property

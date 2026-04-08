@@ -169,3 +169,69 @@ class SafetyAlert(TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     starts_at: Mapped[datetime | None] = mapped_column(DateTime)
     ends_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class ChatConversation(TimestampMixin, Base):
+    __tablename__ = "chat_conversations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    language: Mapped[str] = mapped_column(String(16), default="en", nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="active", nullable=False)
+    metadata: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    last_message_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user: Mapped["User"] = relationship()
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("chat_conversations.id"), nullable=False)
+    message_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    language: Mapped[str | None] = mapped_column(String(16))
+    citations: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    query_text: Mapped[str | None] = mapped_column(Text)
+    retrieval_event_id: Mapped[str | None] = mapped_column(String(36))
+    response_mode: Mapped[str] = mapped_column(String(16), default="text", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    conversation: Mapped["ChatConversation"] = relationship()
+
+
+class ReaderChatConversation(TimestampMixin, Base):
+    __tablename__ = "chat_reader_conversations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    language: Mapped[str] = mapped_column(String(16), default="en", nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="active", nullable=False)
+    metadata: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    last_message_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user: Mapped["User"] = relationship()
+
+
+class ReaderChatMessage(Base):
+    __tablename__ = "chat_reader_messages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("chat_reader_conversations.id"), nullable=False
+    )
+    message_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    language: Mapped[str | None] = mapped_column(String(16))
+    citations: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    query_text: Mapped[str | None] = mapped_column(Text)
+    retrieval_event_id: Mapped[str | None] = mapped_column(String(36))
+    response_mode: Mapped[str] = mapped_column(String(16), default="text", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    conversation: Mapped["ReaderChatConversation"] = relationship()

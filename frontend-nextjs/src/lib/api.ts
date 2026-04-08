@@ -19,13 +19,24 @@ function buildErrorMessage(res: Response, payload: unknown) {
   return `API error: ${res.status}`;
 }
 
+function buildNetworkErrorMessage(endpoint: string, error: unknown) {
+  const suffix =
+    error instanceof Error && error.message ? ` (${error.message})` : "";
+  return `Backend unavailable at ${API_BASE_URL}${endpoint}${suffix}`;
+}
+
 export const apiClient = {
   async get(endpoint: string) {
-    const res = await fetch(`${API_BASE_URL}${endpoint}`, {
-      headers: {
-        Accept: "application/json",
-      },
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE_URL}${endpoint}`, {
+        headers: {
+          Accept: "application/json",
+        },
+      });
+    } catch (error) {
+      throw new Error(buildNetworkErrorMessage(endpoint, error));
+    }
     const payload = await parseJsonSafely(res);
     if (!res.ok) {
       throw new Error(buildErrorMessage(res, payload));
@@ -34,14 +45,19 @@ export const apiClient = {
   },
 
   async post(endpoint: string, body: unknown) {
-    const res = await fetch(`${API_BASE_URL}${endpoint}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify(body),
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE_URL}${endpoint}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (error) {
+      throw new Error(buildNetworkErrorMessage(endpoint, error));
+    }
     const payload = await parseJsonSafely(res);
     if (!res.ok) {
       throw new Error(buildErrorMessage(res, payload));

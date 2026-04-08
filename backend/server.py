@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import mimetypes
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -18,6 +20,12 @@ from app.core.config import get_settings
 from app.db.neo4j import check_neo4j_connection, get_driver
 from app.db.postgres import check_postgres_connection, engine
 from app.services.db_compat import ensure_database_compatibility
+from app.services.dspy_pipeline import (
+    generate_grounded_answer_with_dspy,
+    rewrite_query_with_dspy,
+    verify_grounded_answer_with_dspy,
+)
+from app.services.guardrails import GuardrailDecision, evaluate_guardrail
 from app.services.sop_retrieval import get_sop_retriever
 from app.services.training_builder import generate_learning_assets, persist_learning_assets
 
@@ -31,6 +39,50 @@ SARVAM_TRANSLATE_URL = settings.SARVAM_TRANSLATE_URL
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 AUTO_LANGUAGE = "unknown"
 DEFAULT_TTS_LANGUAGE = "en-IN"
+DEFAULT_TTS_SPEAKER = "suhani"
+MAX_TTS_CHARACTERS = 500
+SUPPORTED_TTS_SPEAKERS = {
+    "aditya",
+    "ritu",
+    "ashutosh",
+    "priya",
+    "neha",
+    "rahul",
+    "pooja",
+    "rohan",
+    "simran",
+    "kavya",
+    "amit",
+    "dev",
+    "ishita",
+    "shreya",
+    "ratan",
+    "varun",
+    "manan",
+    "sumit",
+    "roopa",
+    "kabir",
+    "aayan",
+    "shubh",
+    "advait",
+    "amelia",
+    "sophia",
+    "anand",
+    "tanya",
+    "tarun",
+    "sunny",
+    "mani",
+    "gokul",
+    "vijay",
+    "shruti",
+    "suhani",
+    "mohit",
+    "kavitha",
+    "rehan",
+    "soham",
+    "rupali",
+    "niharika",
+}
 SUPPORTED_TTS_LANGUAGES = {
     "en-IN",
     "hi-IN",
@@ -49,7 +101,7 @@ SUPPORTED_TTS_LANGUAGES = {
 class ChatRequest(BaseModel):
     text: str
     language: str = "en-IN"
-    speaker: str = "suhani"
+    speaker: str = DEFAULT_TTS_SPEAKER
 
 
 class Citation(BaseModel):
@@ -68,6 +120,8 @@ class Citation(BaseModel):
     bbox_y0: float | None = None
     bbox_x1: float | None = None
     bbox_y1: float | None = None
+    line_start: int | None = None
+    line_end: int | None = None
 
 
 class ChatResponse(BaseModel):
@@ -75,6 +129,7 @@ class ChatResponse(BaseModel):
     assistant_text: str
     assistant_tts_text: str | None = None
     audio_base64: str
+    audio_mime_type: str = "audio/wav"
     citations: list[Citation] = []
 
 
@@ -83,6 +138,9 @@ class QueryRequest(BaseModel):
     language: str = "en"
     role: str | None = "operator"
     user_id: str | None = None
+    conversation_id: str | None = None
+    revision_id: str | None = None
+    chat_scope: str = "general"
     top_k: int = 5
 
 
@@ -102,6 +160,8 @@ class QueryEvidence(BaseModel):
     bbox_y0: float | None = None
     bbox_x1: float | None = None
     bbox_y1: float | None = None
+    line_start: int | None = None
+    line_end: int | None = None
     scores: dict[str, float]
 
 
@@ -110,8 +170,48 @@ class QueryResponse(BaseModel):
     confidence: float
     latency_ms: int
     retrieval_event_id: str | None = None
+    conversation_id: str | None = None
     evidence: list[QueryEvidence]
     diagnostics: dict[str, Any]
+
+
+class ChatConversationCreateRequest(BaseModel):
+    user_id: str
+    language: str = "en"
+    title: str | None = None
+    chat_scope: str = "general"
+
+
+class ChatConversationSummary(BaseModel):
+    id: str
+    user_id: str
+    title: str
+    language: str
+    status: str
+    chat_scope: str = "general"
+    revision_id: str | None = None
+    message_count: int = 0
+    preview: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    last_message_at: str | None = None
+
+
+class ChatConversationMessage(BaseModel):
+    id: str
+    role: str
+    content: str
+    language: str | None = None
+    citations: list[dict[str, Any]] = []
+    query_text: str | None = None
+    retrieval_event_id: str | None = None
+    response_mode: str = "text"
+    created_at: str | None = None
+
+
+class ChatConversationDetail(BaseModel):
+    conversation: ChatConversationSummary
+    messages: list[ChatConversationMessage]
 
 
 class AssignmentProgressRequest(BaseModel):
@@ -400,6 +500,652 @@ def _get_user(conn, user_id: str) -> dict[str, Any]:
     return dict(row)
 
 
+def _normalize_chat_language(language: str | None) -> str:
+    normalized = (language or "en").strip().lower()
+    if normalized.startswith("hing"):
+        return "hing"
+    if normalized.startswith("hi"):
+        return "hi"
+    return "en"
+
+
+def _normalize_chat_scope(scope: str | None) -> str:
+    normalized = (scope or "general").strip().lower()
+    if normalized in {"reader", "doc_reader", "reading"}:
+        return "reader"
+    return "general"
+
+
+def _conversation_title_from_query(query: str) -> str:
+    cleaned = " ".join((query or "").strip().split())
+    if not cleaned:
+        return "New conversation"
+    if len(cleaned) <= 72:
+        return cleaned
+    return f"{cleaned[:69].rstrip()}..."
+
+
+def _chat_storage_tables(chat_scope: str) -> tuple[str, str]:
+    normalized_scope = _normalize_chat_scope(chat_scope)
+    if normalized_scope == "reader":
+        return "chat_reader_conversations", "chat_reader_messages"
+    return "chat_conversations", "chat_messages"
+
+
+def _legacy_general_scope_filter(chat_scope: str) -> str:
+    if _normalize_chat_scope(chat_scope) == "general":
+        # Prevent legacy reader rows from showing up in general chat lists/lookups.
+        return "AND COALESCE(c.metadata->>'scope', 'general') <> 'reader'"
+    return ""
+
+
+def _serialize_chat_conversation(
+    row: dict[str, Any],
+    *,
+    chat_scope: str = "general",
+) -> dict[str, Any]:
+    payload = dict(row)
+    payload["chat_scope"] = _normalize_chat_scope(payload.get("chat_scope") or chat_scope)
+    if payload.get("revision_id") == "":
+        payload["revision_id"] = None
+    payload["created_at"] = _iso(payload.get("created_at"))
+    payload["updated_at"] = _iso(payload.get("updated_at"))
+    payload["last_message_at"] = _iso(payload.get("last_message_at"))
+    payload["message_count"] = int(payload.get("message_count") or 0)
+    return payload
+
+
+def _list_chat_conversations(
+    conn,
+    user_id: str,
+    limit: int = 12,
+    scope: str | None = None,
+) -> list[dict[str, Any]]:
+    normalized_scope = _normalize_chat_scope(scope)
+    conversation_table, message_table = _chat_storage_tables(normalized_scope)
+    legacy_filter = _legacy_general_scope_filter(normalized_scope)
+    rows = conn.execute(
+        text(
+            f"""
+            SELECT
+                c.id::text AS id,
+                c.user_id::text AS user_id,
+                c.title,
+                c.language,
+                c.status,
+                :chat_scope AS chat_scope,
+                c.metadata->>'revision_id' AS revision_id,
+                c.created_at,
+                c.updated_at,
+                c.last_message_at,
+                COALESCE(msg_count.message_count, 0) AS message_count,
+                preview.content AS preview
+            FROM {conversation_table} c
+            LEFT JOIN LATERAL (
+                SELECT count(*)::int AS message_count
+                FROM {message_table} m
+                WHERE m.conversation_id = c.id
+            ) msg_count ON true
+            LEFT JOIN LATERAL (
+                SELECT m.content
+                FROM {message_table} m
+                WHERE m.conversation_id = c.id
+                ORDER BY m.message_order DESC
+                LIMIT 1
+            ) preview ON true
+            WHERE c.user_id = CAST(:user_id AS uuid)
+              AND c.status <> 'archived'
+              {legacy_filter}
+            ORDER BY c.last_message_at DESC, c.created_at DESC
+            LIMIT :limit
+            """
+        ),
+        {"user_id": user_id, "limit": limit, "chat_scope": normalized_scope},
+    ).mappings()
+    return [
+        _serialize_chat_conversation(dict(row), chat_scope=normalized_scope)
+        for row in rows
+    ]
+
+
+def _get_chat_conversation(
+    conn,
+    conversation_id: str,
+    user_id: str,
+    *,
+    chat_scope: str = "general",
+) -> dict[str, Any]:
+    normalized_scope = _normalize_chat_scope(chat_scope)
+    conversation_table, message_table = _chat_storage_tables(normalized_scope)
+    legacy_filter = _legacy_general_scope_filter(normalized_scope)
+    row = conn.execute(
+        text(
+            f"""
+            SELECT
+                c.id::text AS id,
+                c.user_id::text AS user_id,
+                c.title,
+                c.language,
+                c.status,
+                :chat_scope AS chat_scope,
+                c.metadata->>'revision_id' AS revision_id,
+                c.created_at,
+                c.updated_at,
+                c.last_message_at,
+                COALESCE(msg_count.message_count, 0) AS message_count,
+                preview.content AS preview
+            FROM {conversation_table} c
+            LEFT JOIN LATERAL (
+                SELECT count(*)::int AS message_count
+                FROM {message_table} m
+                WHERE m.conversation_id = c.id
+            ) msg_count ON true
+            LEFT JOIN LATERAL (
+                SELECT m.content
+                FROM {message_table} m
+                WHERE m.conversation_id = c.id
+                ORDER BY m.message_order DESC
+                LIMIT 1
+            ) preview ON true
+            WHERE c.id = CAST(:conversation_id AS uuid)
+              AND c.user_id = CAST(:user_id AS uuid)
+              {legacy_filter}
+            """
+        ),
+        {
+            "conversation_id": conversation_id,
+            "user_id": user_id,
+            "chat_scope": normalized_scope,
+        },
+    ).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return _serialize_chat_conversation(dict(row), chat_scope=normalized_scope)
+
+
+def _detect_chat_scope_for_conversation(
+    conn,
+    conversation_id: str,
+    user_id: str,
+) -> str | None:
+    reader_row = conn.execute(
+        text(
+            """
+            SELECT 1
+            FROM chat_reader_conversations c
+            WHERE c.id = CAST(:conversation_id AS uuid)
+              AND c.user_id = CAST(:user_id AS uuid)
+            """
+        ),
+        {"conversation_id": conversation_id, "user_id": user_id},
+    ).first()
+    if reader_row:
+        return "reader"
+
+    general_row = conn.execute(
+        text(
+            """
+            SELECT 1
+            FROM chat_conversations c
+            WHERE c.id = CAST(:conversation_id AS uuid)
+              AND c.user_id = CAST(:user_id AS uuid)
+              AND COALESCE(c.metadata->>'scope', 'general') <> 'reader'
+            """
+        ),
+        {"conversation_id": conversation_id, "user_id": user_id},
+    ).first()
+    if general_row:
+        return "general"
+
+    legacy_reader_row = conn.execute(
+        text(
+            """
+            SELECT 1
+            FROM chat_conversations c
+            WHERE c.id = CAST(:conversation_id AS uuid)
+              AND c.user_id = CAST(:user_id AS uuid)
+              AND COALESCE(c.metadata->>'scope', 'general') = 'reader'
+            """
+        ),
+        {"conversation_id": conversation_id, "user_id": user_id},
+    ).first()
+    if legacy_reader_row:
+        return "reader"
+    return None
+
+
+def _get_chat_messages(
+    conn,
+    conversation_id: str,
+    *,
+    chat_scope: str = "general",
+) -> list[dict[str, Any]]:
+    normalized_scope = _normalize_chat_scope(chat_scope)
+    _, message_table = _chat_storage_tables(normalized_scope)
+    rows = conn.execute(
+        text(
+            f"""
+            SELECT
+                id::text AS id,
+                role,
+                content,
+                language,
+                citations,
+                query_text,
+                retrieval_event_id::text AS retrieval_event_id,
+                response_mode,
+                created_at
+            FROM {message_table}
+            WHERE conversation_id = CAST(:conversation_id AS uuid)
+            ORDER BY message_order ASC, created_at ASC
+            """
+        ),
+        {"conversation_id": conversation_id},
+    ).mappings()
+    messages: list[dict[str, Any]] = []
+    for row in rows:
+        payload = dict(row)
+        payload["created_at"] = _iso(payload.get("created_at"))
+        payload["citations"] = payload.get("citations") or []
+        messages.append(payload)
+    return messages
+
+
+def _create_chat_conversation(
+    conn,
+    *,
+    user_id: str,
+    language: str,
+    title: str | None = None,
+    chat_scope: str = "general",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    normalized_scope = _normalize_chat_scope(chat_scope)
+    normalized_language = _normalize_chat_language(language)
+    conversation_table, _ = _chat_storage_tables(normalized_scope)
+    metadata_payload = dict(metadata or {})
+    metadata_payload["scope"] = normalized_scope
+    safe_title = (title or "").strip() or "New conversation"
+    row = conn.execute(
+        text(
+            f"""
+            INSERT INTO {conversation_table} (
+                user_id,
+                title,
+                language,
+                metadata
+            )
+            VALUES (
+                CAST(:user_id AS uuid),
+                :title,
+                :language,
+                CAST(:metadata AS jsonb)
+            )
+            RETURNING
+                id::text AS id,
+                user_id::text AS user_id,
+                title,
+                language,
+                status,
+                metadata->>'revision_id' AS revision_id,
+                created_at,
+                updated_at,
+                last_message_at
+            """
+        ),
+        {
+            "user_id": user_id,
+            "title": safe_title,
+            "language": normalized_language,
+            "metadata": json.dumps(metadata_payload),
+        },
+    ).mappings().one()
+    payload = _serialize_chat_conversation(dict(row), chat_scope=normalized_scope)
+    payload["message_count"] = 0
+    payload["preview"] = None
+    return payload
+
+
+def _append_chat_message(
+    conn,
+    *,
+    conversation_id: str,
+    role: str,
+    content: str,
+    language: str | None = None,
+    citations: list[dict[str, Any]] | None = None,
+    query_text: str | None = None,
+    retrieval_event_id: str | None = None,
+    response_mode: str = "text",
+    chat_scope: str = "general",
+) -> dict[str, Any]:
+    normalized_scope = _normalize_chat_scope(chat_scope)
+    conversation_table, message_table = _chat_storage_tables(normalized_scope)
+    next_order = int(
+        conn.execute(
+            text(
+                f"""
+                SELECT COALESCE(MAX(message_order), 0) + 1
+                FROM {message_table}
+                WHERE conversation_id = CAST(:conversation_id AS uuid)
+                """
+            ),
+            {"conversation_id": conversation_id},
+        ).scalar_one()
+    )
+    row = conn.execute(
+        text(
+            f"""
+            INSERT INTO {message_table} (
+                conversation_id,
+                message_order,
+                role,
+                content,
+                language,
+                citations,
+                query_text,
+                retrieval_event_id,
+                response_mode
+            )
+            VALUES (
+                CAST(:conversation_id AS uuid),
+                :message_order,
+                :role,
+                :content,
+                :language,
+                CAST(:citations AS jsonb),
+                :query_text,
+                CAST(:retrieval_event_id AS uuid),
+                :response_mode
+            )
+            RETURNING
+                id::text AS id,
+                role,
+                content,
+                language,
+                citations,
+                query_text,
+                retrieval_event_id::text AS retrieval_event_id,
+                response_mode,
+                created_at
+            """
+        ),
+        {
+            "conversation_id": conversation_id,
+            "message_order": next_order,
+            "role": role,
+            "content": content,
+            "language": _normalize_chat_language(language),
+            "citations": json.dumps(citations or []),
+            "query_text": query_text,
+            "retrieval_event_id": retrieval_event_id,
+            "response_mode": response_mode,
+        },
+    ).mappings().one()
+    conn.execute(
+        text(
+            f"""
+            UPDATE {conversation_table}
+            SET
+                updated_at = now(),
+                last_message_at = now()
+            WHERE id = CAST(:conversation_id AS uuid)
+            """
+        ),
+        {"conversation_id": conversation_id},
+    )
+    payload = dict(row)
+    payload["created_at"] = _iso(payload.get("created_at"))
+    payload["citations"] = payload.get("citations") or []
+    return payload
+
+
+def _history_from_messages(messages: list[dict[str, Any]]) -> list[dict[str, str]]:
+    history: list[dict[str, str]] = []
+    for item in messages[-8:]:
+        content = (item.get("content") or "").strip()
+        role = (item.get("role") or "").strip()
+        if content and role in {"user", "assistant"}:
+            history.append({"role": role, "content": content})
+    return history
+
+
+def _is_summary_style_query(query: str) -> bool:
+    lowered = (query or "").strip().lower()
+    if not lowered:
+        return False
+    summary_markers = (
+        "summarize",
+        "summarise",
+        "summary",
+        "summariz",
+        "sumariz",
+        "overview",
+        "gist",
+        "key points",
+        "points",
+        "whole",
+        "entire",
+    )
+    return any(marker in lowered for marker in summary_markers)
+
+
+def _requested_summary_points(query: str, default: int = 10) -> int:
+    lowered = (query or "").strip().lower()
+    match = re.search(r"\b(\d{1,2})\s*points?\b", lowered)
+    if not match:
+        return default
+    try:
+        value = int(match.group(1))
+    except Exception:
+        return default
+    return max(3, min(value, 15))
+
+
+def _extractive_summary_from_evidence(
+    evidence: list[dict[str, Any]],
+    *,
+    points: int = 10,
+) -> str:
+    if not evidence:
+        return "Not found in approved documents."
+
+    collected: list[str] = []
+    seen: set[str] = set()
+
+    for item in evidence[:12]:
+        citation = item.get("citation_label") or (
+            f"{item.get('document_code', 'doc')} p.{item.get('page_start', '?')}"
+        )
+        content = (item.get("content") or "").strip()
+        if not content:
+            continue
+        segments = re.split(r"[\n\r]+|(?<=[.!?])\s+", content)
+        for segment in segments:
+            cleaned = re.sub(r"\s+", " ", segment).strip(" -\t")
+            if len(cleaned) < 35:
+                continue
+            key = cleaned.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            collected.append(f"{cleaned} [{citation}]")
+            if len(collected) >= points:
+                break
+        if len(collected) >= points:
+            break
+
+    if not collected:
+        top = evidence[0]
+        citation = top.get("citation_label") or (
+            f"{top.get('document_code', 'doc')} p.{top.get('page_start', '?')}"
+        )
+        snippet = re.sub(r"\s+", " ", (top.get("content") or "").strip())
+        if not snippet:
+            return "Not found in approved documents."
+        return f"1. {snippet[:280]} [{citation}]"
+
+    return "\n".join(f"{idx}. {line}" for idx, line in enumerate(collected, start=1))
+
+
+def _is_contextual_follow_up(query: str) -> bool:
+    lowered = (query or "").strip().lower()
+    if not lowered:
+        return False
+
+    markers = (
+        "what about",
+        "how about",
+        "for this",
+        "for that",
+        "same thing",
+        "next step",
+        "that step",
+        "this step",
+        "continue",
+        "again",
+    )
+    if any(marker in lowered for marker in markers):
+        return True
+
+    words = lowered.split()
+    if len(words) <= 4:
+        short_followup_tokens = {"it", "this", "that", "same", "then", "next"}
+        if any(token in words for token in short_followup_tokens):
+            return True
+
+    pronoun_pattern = r"\b(it|this|that|those|these|same|above|earlier)\b"
+    return bool(re.search(pronoun_pattern, lowered))
+
+
+def _build_contextual_query(query: str, history: list[dict[str, str]] | None) -> str:
+    normalized_query = re.sub(r"\s+", " ", (query or "")).strip()
+    if not normalized_query or not history or not _is_contextual_follow_up(normalized_query):
+        return normalized_query
+
+    last_user_question = next(
+        (
+            (item.get("content") or "").strip()
+            for item in reversed(history)
+            if item.get("role") == "user" and (item.get("content") or "").strip()
+        ),
+        "",
+    )
+    if not last_user_question:
+        return normalized_query
+
+    return (
+        f"Previous question: {last_user_question}\n"
+        f"Follow-up question: {normalized_query}"
+    )
+
+
+def _notify_guardrail_violation(
+    conn,
+    *,
+    user_id: str | None,
+    query_text: str,
+    decision: GuardrailDecision,
+    channel: str,
+    conversation_id: str | None = None,
+) -> None:
+    if not decision.blocked:
+        return
+
+    normalized_query = re.sub(r"\s+", " ", (query_text or "")).strip()
+    snippet = normalized_query[:240]
+    details = {
+        "channel": channel,
+        "category": decision.category,
+        "reason": decision.reason,
+        "severity": decision.severity,
+        "matched_terms": list(decision.matched_terms),
+        "conversation_id": conversation_id,
+        "query_excerpt": snippet,
+    }
+
+    conn.execute(
+        text(
+            """
+            INSERT INTO admin_audit_logs (
+                actor_user_id,
+                action,
+                target_type,
+                target_id,
+                details
+            )
+            VALUES (
+                CAST(:actor_user_id AS uuid),
+                :action,
+                :target_type,
+                :target_id,
+                CAST(:details AS jsonb)
+            )
+            """
+        ),
+        {
+            "actor_user_id": user_id,
+            "action": "guardrail_blocked_query",
+            "target_type": "query",
+            "target_id": conversation_id or "ad-hoc",
+            "details": json.dumps(details),
+        },
+    )
+
+    targets = [
+        row["id"]
+        for row in conn.execute(
+            text(
+                """
+                SELECT id::text AS id
+                FROM users
+                WHERE role IN ('admin', 'supervisor')
+                ORDER BY role, full_name
+                """
+            )
+        ).mappings()
+    ]
+    if not targets:
+        return
+
+    severity = "high" if decision.severity == "high" else "medium"
+    category = (decision.category or "policy").replace("_", " ").title()
+    reporter = user_id or "anonymous"
+    base_key = _det_uuid(
+        "guardrail",
+        reporter,
+        decision.category or "unknown",
+        decision.reason or "unspecified",
+        snippet[:80],
+        datetime.now(timezone.utc).isoformat()[:16],
+    )
+
+    for target_user_id in targets:
+        _queue_notification(
+            conn,
+            user_id=target_user_id,
+            event_type="guardrail_blocked",
+            severity=severity,
+            title=f"Guardrail blocked: {category}",
+            message=(
+                f"Blocked {channel} request from user {reporter}. "
+                f"Reason: {(decision.reason or 'policy_violation').replace('_', ' ')}."
+            ),
+            cta_url="/admin/analytics",
+            event_key=f"guardrail:{base_key}:{target_user_id}",
+        )
+
+
+def _guardrail_diagnostics(decision: GuardrailDecision) -> dict[str, Any]:
+    return {
+        "blocked": bool(decision.blocked),
+        "category": decision.category,
+        "reason": decision.reason,
+        "severity": decision.severity,
+        "matched_terms": list(decision.matched_terms),
+    }
+
+
 def _queue_notification(
     conn,
     *,
@@ -618,17 +1364,57 @@ def _get_tts_language(detected_language: str) -> str:
     return DEFAULT_TTS_LANGUAGE
 
 
-async def _translate_speech_to_english(client: httpx.AsyncClient, audio_bytes: bytes, language: str) -> tuple[str, str]:
+def _voice_not_understood_message(language_code: str | None) -> str:
+    normalized = (language_code or "").strip().lower()
+    if normalized.startswith("hi"):
+        return "Awaaz clear nahi mili. Kripya dobara thoda dheere aur mic ke paas bolkar koshish karein."
+    return "I could not hear you clearly. Please try again slowly and closer to the microphone."
+
+
+def _is_english_language(language_code: str | None) -> bool:
+    return bool(language_code and language_code.lower().startswith("en"))
+
+
+def _normalize_tts_speaker(speaker: str | None) -> str:
+    normalized_speaker = (speaker or "").strip().lower()
+    if normalized_speaker in SUPPORTED_TTS_SPEAKERS:
+        return normalized_speaker
+    return DEFAULT_TTS_SPEAKER
+
+
+def _resolve_audio_upload(file_name: str | None, content_type: str | None) -> tuple[str, str]:
+    normalized_content_type = (content_type or "").strip().lower() or "audio/webm"
+    safe_file_name = (file_name or "").strip()
+
+    if safe_file_name:
+        guessed_content_type, _ = mimetypes.guess_type(safe_file_name)
+        if guessed_content_type:
+            normalized_content_type = guessed_content_type.lower()
+    else:
+        extension = mimetypes.guess_extension(normalized_content_type) or ".webm"
+        safe_file_name = f"voice-query{extension}"
+
+    return safe_file_name, normalized_content_type
+
+
+async def _transcribe_speech(
+    client: httpx.AsyncClient,
+    audio_bytes: bytes,
+    language: str,
+    file_name: str | None = None,
+    content_type: str | None = None,
+) -> tuple[str, str]:
     normalized_language = _normalize_stt_language(language)
+    upload_name, upload_content_type = _resolve_audio_upload(file_name, content_type)
     stt_resp = await client.post(
         SARVAM_STT_URL,
         headers={"api-subscription-key": settings.SARVAM_API_KEY},
         data={
             "language_code": normalized_language,
             "model": settings.SARVAM_STT_MODEL,
-            "mode": "translate",
+            "mode": "transcribe",
         },
-        files={"file": ("audio.webm", audio_bytes, "audio/webm")},
+        files={"file": (upload_name, audio_bytes, upload_content_type)},
     )
     stt_resp.raise_for_status()
     stt_data = stt_resp.json()
@@ -637,10 +1423,14 @@ async def _translate_speech_to_english(client: httpx.AsyncClient, audio_bytes: b
     return transcript, detected_language
 
 
-async def _translate_assistant_text(client: httpx.AsyncClient, assistant_text: str, target_language: str) -> tuple[str, str]:
-    tts_language = _get_tts_language(target_language)
-    if tts_language == DEFAULT_TTS_LANGUAGE:
-        return assistant_text, tts_language
+async def _translate_text(
+    client: httpx.AsyncClient,
+    text: str,
+    source_language: str,
+    target_language: str,
+) -> str:
+    if not text.strip() or source_language == target_language:
+        return text
 
     translate_resp = await client.post(
         SARVAM_TRANSLATE_URL,
@@ -649,16 +1439,94 @@ async def _translate_assistant_text(client: httpx.AsyncClient, assistant_text: s
             "Content-Type": "application/json",
         },
         json={
-            "input": assistant_text,
-            "source_language_code": DEFAULT_TTS_LANGUAGE,
-            "target_language_code": tts_language,
+            "input": text,
+            "source_language_code": source_language,
+            "target_language_code": target_language,
             "model": settings.SARVAM_TRANSLATE_MODEL,
             "mode": settings.SARVAM_TRANSLATE_MODE,
         },
     )
     translate_resp.raise_for_status()
     translated_text = (translate_resp.json().get("translated_text") or "").strip()
-    return translated_text or assistant_text, tts_language
+    return translated_text or text
+
+
+async def _prepare_voice_query(
+    client: httpx.AsyncClient,
+    audio_bytes: bytes,
+    language: str,
+    file_name: str | None = None,
+    content_type: str | None = None,
+) -> tuple[str, str, str]:
+    spoken_text, detected_language = await _transcribe_speech(
+        client, audio_bytes, language, file_name, content_type
+    )
+    if not spoken_text.strip():
+        return "", "", detected_language
+
+    if _is_english_language(detected_language):
+        return spoken_text, spoken_text, detected_language
+
+    try:
+        normalized_query = await _translate_text(
+            client,
+            spoken_text,
+            detected_language,
+            DEFAULT_TTS_LANGUAGE,
+        )
+    except Exception:
+        normalized_query = spoken_text
+
+    return spoken_text, normalized_query, detected_language
+
+
+async def _translate_assistant_text(client: httpx.AsyncClient, assistant_text: str, target_language: str) -> tuple[str, str]:
+    prepared_text = _prepare_tts_text(assistant_text)
+    tts_language = _get_tts_language(target_language)
+    if tts_language == DEFAULT_TTS_LANGUAGE:
+        return prepared_text, tts_language
+
+    translated_text = await _translate_text(
+        client,
+        prepared_text,
+        DEFAULT_TTS_LANGUAGE,
+        tts_language,
+    )
+    return _prepare_tts_text(translated_text), tts_language
+
+
+def _prepare_tts_text(text: str) -> str:
+    if not text:
+        return ""
+
+    cleaned = text.replace("\r", "\n")
+    cleaned = re.sub(r"\n+", ". ", cleaned)
+    cleaned = re.sub(r"\[[0-9,\s]+\]", "", cleaned)
+    cleaned = re.sub(r"[*_`#>-]", " ", cleaned)
+    cleaned = re.sub(r"\s+([,.:;!?])", r"\1", cleaned)
+    cleaned = re.sub(r"([,.:;!?])(?:\s*[,.:;])+", r"\1", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if len(cleaned) <= MAX_TTS_CHARACTERS:
+        return cleaned
+
+    sentence_chunks = re.split(r"(?<=[.!?])\s+", cleaned)
+    selected: list[str] = []
+    total_length = 0
+
+    for chunk in sentence_chunks:
+        candidate = chunk.strip()
+        if not candidate:
+            continue
+        projected_length = total_length + len(candidate) + (1 if selected else 0)
+        if projected_length > MAX_TTS_CHARACTERS - 28:
+            break
+        selected.append(candidate)
+        total_length = projected_length
+
+    shortened = " ".join(selected).strip() or cleaned[: MAX_TTS_CHARACTERS - 28].rsplit(" ", 1)[0].strip()
+    if not shortened:
+        shortened = cleaned[: MAX_TTS_CHARACTERS - 28].strip()
+    return f"{shortened}. See screen for full details."[:MAX_TTS_CHARACTERS]
 
 
 async def _synthesize_speech(client: httpx.AsyncClient, text: str, language: str, speaker: str) -> str:
@@ -671,7 +1539,7 @@ async def _synthesize_speech(client: httpx.AsyncClient, text: str, language: str
         json={
             "inputs": [text],
             "target_language_code": language,
-            "speaker": speaker,
+            "speaker": _normalize_tts_speaker(speaker),
             "model": settings.SARVAM_TTS_MODEL,
             "pace": 1.0,
             "enable_preprocessing": True,
@@ -681,14 +1549,38 @@ async def _synthesize_speech(client: httpx.AsyncClient, text: str, language: str
     return tts_resp.json()["audios"][0]
 
 
-async def _generate_grounded_answer(query: str, language: str, evidence: list[dict[str, Any]]) -> str:
-    if not evidence:
-        return "Not found in approved documents."
+async def _generate_grounded_answer(
+    query: str,
+    language: str,
+    evidence: list[dict[str, Any]],
+    history: list[dict[str, str]] | None = None,
+    chat_scope: str = "general",
+) -> str:
+    safe_fallback = "Not found in approved documents."
+    is_summary_query = _is_summary_style_query(query)
+    normalized_scope = _normalize_chat_scope(chat_scope)
+    summary_points = _requested_summary_points(query)
+    skip_verifier_gate = normalized_scope == "reader" and is_summary_query
 
+    if not evidence:
+        return safe_fallback
+
+    evidence_limit = 10 if (is_summary_query and normalized_scope == "reader") else 5
     context_blocks = []
-    for idx, ev in enumerate(evidence[:4], start=1):
-        citation = ev.get("citation_label") or f"{ev.get('document_code', 'doc')} p.{ev.get('page_start', '?')}"
-        content = (ev.get("content") or "")[:2000]
+    for idx, ev in enumerate(evidence[:evidence_limit], start=1):
+        line_start = ev.get("line_start")
+        line_end = ev.get("line_end")
+        line_label = ""
+        if line_start is not None:
+            line_label = (
+                f" l.{line_start}-{line_end}"
+                if line_end is not None and line_end != line_start
+                else f" l.{line_start}"
+            )
+        citation = ev.get("citation_label") or (
+            f"{ev.get('document_code', 'doc')} p.{ev.get('page_start', '?')}{line_label}"
+        )
+        content = (ev.get("content") or "")[:1600]
         context_blocks.append(f"[{idx}] {citation}\n{content}")
     context = "\n\n".join(context_blocks)
 
@@ -697,42 +1589,104 @@ async def _generate_grounded_answer(query: str, language: str, evidence: list[di
         citation = top.get("citation_label") or f"{top.get('document_code', 'doc')} p.{top.get('page_start', '?')}"
         return f"{(top.get('content') or '').strip()}\n\nSource: {citation}"
 
-    system_prompt = (
-        "You are a helpful SOP assistant for plant operators. "
-        "Answer the question using ONLY the provided evidence. "
-        "Extract and summarize the relevant information from the evidence to answer the question. "
-        "If the evidence contains relevant information, provide the answer with proper citations like [1], [2]. "
-        "If the evidence truly does not contain information to answer the question, then say: Not found in approved documents. "
-        "Keep your response concise and actionable for plant operators."
-    )
+    draft_answer: str | None = None
+    draft_citations: str | None = None
+    dspy_role = "reader_copilot" if normalized_scope == "reader" else "operator"
 
-    user_prompt = (
-        f"Question: {query}\n"
-        f"Language: {language}\n\n"
-        f"Here is the evidence from approved documents:\n{context}\n\n"
-        "Based on the evidence above, answer the question directly. Extract the specific steps or information requested."
-    )
-
-    async with httpx.AsyncClient(timeout=45.0) as client:
-        resp = await client.post(
-            GROQ_CHAT_URL,
-            headers={
-                "Authorization": f"Bearer {settings.GROQ_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": settings.GROQ_MODEL,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "max_tokens": 280,
-                "temperature": 0.1,
-            },
+    if not skip_verifier_gate:
+        dspy_response = generate_grounded_answer_with_dspy(
+            query,
+            language=language,
+            role=dspy_role,
+            history=history,
+            evidence=evidence,
         )
-        resp.raise_for_status()
-        data = resp.json()
-    return data["choices"][0]["message"]["content"].strip()
+        if dspy_response and dspy_response.get("answer"):
+            draft_answer = dspy_response["answer"].strip()
+            draft_citations = dspy_response.get("citations")
+
+    if not draft_answer:
+        history_text = "\n".join(
+            f"{item['role'].title()}: {item['content']}"
+            for item in (history or [])[-8:]
+            if item.get("content")
+        )
+
+        if normalized_scope == "reader":
+            style_instruction = (
+                "You are a document-reading copilot. "
+                "Prioritize exact procedural detail from the selected document revision. "
+                "Keep answers concise and grounded, with explicit citation markers [1], [2]. "
+                "Do not answer beyond the provided document evidence. "
+            )
+            if is_summary_query:
+                style_instruction += (
+                    f"For summary requests, return exactly {summary_points} clean numbered points from the evidence only. "
+                )
+        else:
+            style_instruction = (
+                "You are a plant assistant for general SOP/manual help across approved documents. "
+                "Answer naturally but keep instructions practical and brief. "
+            )
+
+        system_prompt = (
+            style_instruction
+            + "Answer the question using ONLY the provided evidence. "
+            + "Extract and summarize the relevant information from the evidence to answer the question. "
+            + "If the evidence contains relevant information, provide the answer with citations like [1], [2]. "
+            + "If the evidence truly does not contain information to answer the question, then say: Not found in approved documents. "
+            + "Use conversation history only to resolve follow-up references, never to invent new facts."
+        )
+
+        user_prompt = (
+            f"Question: {query}\n"
+            f"Language: {language}\n\n"
+            f"Conversation history:\n{history_text or 'No prior conversation.'}\n\n"
+            f"Here is the evidence from approved documents:\n{context}\n\n"
+            "Based on the evidence above, answer the question directly. Extract the specific steps or information requested."
+        )
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    GROQ_CHAT_URL,
+                    headers={
+                        "Authorization": f"Bearer {settings.GROQ_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": settings.GROQ_MODEL,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        "max_tokens": 420 if (normalized_scope == "reader" and is_summary_query) else (240 if normalized_scope == "reader" else 320),
+                        "temperature": 0.1,
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            draft_answer = data["choices"][0]["message"]["content"].strip()
+        except Exception:
+            if is_summary_query and normalized_scope == "reader":
+                draft_answer = _extractive_summary_from_evidence(
+                    evidence,
+                    points=summary_points,
+                )
+            else:
+                draft_answer = None
+
+    if not skip_verifier_gate:
+        verification = verify_grounded_answer_with_dspy(
+            query,
+            draft_answer=draft_answer or "",
+            drafted_citations=draft_citations,
+            evidence=evidence,
+        )
+        if verification is not None and verification.get("supported") is False:
+            return safe_fallback
+
+    return draft_answer or safe_fallback
 
 
 @app.get("/")
@@ -1133,24 +2087,274 @@ async def update_assignment_progress(assignment_id: str, req: AssignmentProgress
     payload["last_activity_at"] = _iso(payload["last_activity_at"])
     return payload
 
+
+@app.get("/api/conversations", response_model=list[ChatConversationSummary])
+async def list_chat_conversations(
+    user_id: str,
+    limit: int = 12,
+    scope: str | None = None,
+):
+    normalized_scope = _normalize_chat_scope(scope)
+    with engine.connect() as conn:
+        _get_user(conn, user_id)
+        conversations = _list_chat_conversations(
+            conn,
+            user_id,
+            max(1, min(limit, 24)),
+            scope=normalized_scope,
+        )
+    return [ChatConversationSummary(**item) for item in conversations]
+
+
+@app.post("/api/conversations", response_model=ChatConversationSummary)
+async def create_chat_conversation(req: ChatConversationCreateRequest):
+    normalized_scope = _normalize_chat_scope(req.chat_scope)
+    with engine.begin() as conn:
+        _get_user(conn, req.user_id)
+        conversation = _create_chat_conversation(
+            conn,
+            user_id=req.user_id,
+            language=req.language,
+            title=req.title,
+            chat_scope=normalized_scope,
+        )
+    return ChatConversationSummary(**conversation)
+
+
+@app.get("/api/conversations/{conversation_id}", response_model=ChatConversationDetail)
+async def get_chat_conversation(
+    conversation_id: str,
+    user_id: str,
+    scope: str | None = None,
+):
+    normalized_scope = _normalize_chat_scope(scope)
+    with engine.connect() as conn:
+        _get_user(conn, user_id)
+        detected_scope = _detect_chat_scope_for_conversation(conn, conversation_id, user_id)
+        if not detected_scope:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        if detected_scope != normalized_scope:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        conversation = _get_chat_conversation(
+            conn,
+            conversation_id,
+            user_id,
+            chat_scope=normalized_scope,
+        )
+        messages = _get_chat_messages(conn, conversation_id, chat_scope=normalized_scope)
+    return ChatConversationDetail(
+        conversation=ChatConversationSummary(**conversation),
+        messages=[ChatConversationMessage(**item) for item in messages],
+    )
+
+
 @app.post("/api/query", response_model=QueryResponse)
 async def grounded_query(req: QueryRequest):
+    if req.conversation_id and not req.user_id:
+        raise HTTPException(status_code=400, detail="user_id is required with conversation_id")
+
+    normalized_scope = _normalize_chat_scope(req.chat_scope)
+    conversation_metadata: dict[str, Any] = {}
+    if normalized_scope == "reader" and req.revision_id:
+        conversation_metadata["revision_id"] = req.revision_id
+    history: list[dict[str, str]] = []
+    conversation_id = req.conversation_id
+
+    if req.user_id:
+        with engine.connect() as conn:
+            _get_user(conn, req.user_id)
+            if conversation_id:
+                conversation_scope = _detect_chat_scope_for_conversation(
+                    conn, conversation_id, req.user_id
+                )
+                if not conversation_scope:
+                    raise HTTPException(status_code=404, detail="Conversation not found")
+                if conversation_scope != normalized_scope:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "Conversation scope mismatch. "
+                            f"Expected '{normalized_scope}', found '{conversation_scope}'."
+                        ),
+                    )
+                conversation = _get_chat_conversation(
+                    conn,
+                    conversation_id,
+                    req.user_id,
+                    chat_scope=normalized_scope,
+                )
+                if (
+                    normalized_scope == "reader"
+                    and req.revision_id
+                    and conversation.get("revision_id")
+                    and conversation.get("revision_id") != req.revision_id
+                ):
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "Reader conversation revision mismatch. "
+                            "Start a new reader conversation for this document."
+                        ),
+                    )
+                history = _history_from_messages(
+                    _get_chat_messages(conn, conversation_id, chat_scope=normalized_scope)
+                )
+
+    guardrail_decision = evaluate_guardrail(req.query)
+    if guardrail_decision.blocked:
+        answer = guardrail_decision.user_message
+        if req.user_id:
+            with engine.begin() as conn:
+                _get_user(conn, req.user_id)
+                if conversation_id:
+                    _get_chat_conversation(
+                        conn,
+                        conversation_id,
+                        req.user_id,
+                        chat_scope=normalized_scope,
+                    )
+                else:
+                    conversation = _create_chat_conversation(
+                        conn,
+                        user_id=req.user_id,
+                        language=req.language,
+                        title=_conversation_title_from_query(req.query),
+                        chat_scope=normalized_scope,
+                        metadata=conversation_metadata,
+                    )
+                    conversation_id = conversation["id"]
+
+                _append_chat_message(
+                    conn,
+                    conversation_id=conversation_id,
+                    role="user",
+                    content=req.query,
+                    language=req.language,
+                    response_mode="text",
+                    chat_scope=normalized_scope,
+                )
+                _append_chat_message(
+                    conn,
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=answer,
+                    language=req.language,
+                    response_mode="text",
+                    chat_scope=normalized_scope,
+                )
+                _notify_guardrail_violation(
+                    conn,
+                    user_id=req.user_id,
+                    query_text=req.query,
+                    decision=guardrail_decision,
+                    channel="text",
+                    conversation_id=conversation_id,
+                )
+        else:
+            with engine.begin() as conn:
+                _notify_guardrail_violation(
+                    conn,
+                    user_id=None,
+                    query_text=req.query,
+                    decision=guardrail_decision,
+                    channel="text",
+                    conversation_id=None,
+                )
+
+        return QueryResponse(
+            answer=answer,
+            confidence=0.0,
+            latency_ms=0,
+            retrieval_event_id=None,
+            conversation_id=conversation_id,
+            evidence=[],
+            diagnostics={"guardrail": _guardrail_diagnostics(guardrail_decision)},
+        )
+
+    contextual_query = _build_contextual_query(req.query, history)
+    rewritten_query = contextual_query
+    rewrite_result = rewrite_query_with_dspy(
+        contextual_query,
+        language=req.language,
+        role="reader_copilot" if normalized_scope == "reader" else (req.role or "operator"),
+        history=history,
+    )
+    if rewrite_result and rewrite_result.get("rewritten_query"):
+        rewritten_query = rewrite_result["rewritten_query"]
+
+    effective_top_k = max(3, req.top_k)
+    if normalized_scope == "reader" and _is_summary_style_query(req.query):
+        effective_top_k = max(effective_top_k, 12)
+
     result = retriever.query(
-        query_text=req.query,
+        query_text=rewritten_query,
         language=req.language,
         role=req.role,
         user_id=req.user_id,
-        top_k=req.top_k,
+        top_k=effective_top_k,
+        revision_id=req.revision_id,
     )
     evidence = result["evidence"]
-    answer = await _generate_grounded_answer(req.query, req.language, evidence)
+    answer = await _generate_grounded_answer(
+        req.query,
+        req.language,
+        evidence,
+        history=history,
+        chat_scope=normalized_scope,
+    )
     retrieval_event_id = result.get("retrieval_event_id") or result.get("event_id")
+
+    if req.user_id:
+        serialized_citations = [QueryEvidence(**ev).model_dump() for ev in evidence]
+        with engine.begin() as conn:
+            _get_user(conn, req.user_id)
+            if conversation_id:
+                _get_chat_conversation(
+                    conn,
+                    conversation_id,
+                    req.user_id,
+                    chat_scope=normalized_scope,
+                )
+            else:
+                conversation = _create_chat_conversation(
+                    conn,
+                    user_id=req.user_id,
+                    language=req.language,
+                    title=_conversation_title_from_query(req.query),
+                    chat_scope=normalized_scope,
+                    metadata=conversation_metadata,
+                )
+                conversation_id = conversation["id"]
+
+            _append_chat_message(
+                conn,
+                conversation_id=conversation_id,
+                role="user",
+                content=req.query,
+                language=req.language,
+                query_text=rewritten_query,
+                response_mode="text",
+                chat_scope=normalized_scope,
+            )
+            _append_chat_message(
+                conn,
+                conversation_id=conversation_id,
+                role="assistant",
+                content=answer,
+                language=req.language,
+                citations=serialized_citations,
+                query_text=rewritten_query,
+                retrieval_event_id=retrieval_event_id,
+                response_mode="text",
+                chat_scope=normalized_scope,
+            )
 
     return QueryResponse(
         answer=answer,
         confidence=float(result["confidence"]),
         latency_ms=int(result["latency_ms"]),
         retrieval_event_id=retrieval_event_id,
+        conversation_id=conversation_id,
         evidence=[QueryEvidence(**ev) for ev in evidence],
         diagnostics=result["diagnostics"],
     )
@@ -1223,6 +2427,418 @@ async def retrieval_evidence(event_id: str):
     return payload
 
 
+GRAPH_NODE_PRIORITY = (
+    "Platform",
+    "Document",
+    "DocumentRevision",
+    "DocumentChunk",
+    "TrainingModule",
+    "TrainingStep",
+    "Assessment",
+    "User",
+    "Department",
+)
+
+GRAPH_LABEL_ALLOWLIST = set(GRAPH_NODE_PRIORITY)
+
+
+def _graph_node_type(labels: list[str] | tuple[str, ...] | None) -> str:
+    candidates = list(labels or [])
+    for label in GRAPH_NODE_PRIORITY:
+        if label in candidates:
+            return label
+    return candidates[0] if candidates else "Node"
+
+
+def _graph_node_label(node_type: str, properties: dict[str, Any], fallback_id: str) -> str:
+    for key in ("title", "name", "code", "full_name", "revision_label", "id"):
+        value = properties.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()[:72]
+    return f"{node_type} {fallback_id[:8]}"
+
+
+def _graph_node_payload(*, node_id: str, labels: list[str], properties: dict[str, Any]) -> dict[str, Any]:
+    node_type = _graph_node_type(labels)
+    safe_props = {
+        key: value
+        for key, value in properties.items()
+        if isinstance(value, (str, int, float, bool)) or value is None
+    }
+    return {
+        "id": node_id,
+        "type": node_type,
+        "label": _graph_node_label(node_type, safe_props, node_id),
+        "properties": safe_props,
+    }
+
+
+def _graph_summary(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> dict[str, Any]:
+    node_types: dict[str, int] = {}
+    edge_types: dict[str, int] = {}
+    degree: dict[str, int] = {}
+
+    for node in nodes:
+        node_type = str(node.get("type") or "Node")
+        node_types[node_type] = node_types.get(node_type, 0) + 1
+        degree[str(node.get("id"))] = 0
+
+    for edge in edges:
+        edge_type = str(edge.get("type") or "RELATED_TO")
+        edge_types[edge_type] = edge_types.get(edge_type, 0) + 1
+        source = str(edge.get("source"))
+        target = str(edge.get("target"))
+        degree[source] = degree.get(source, 0) + 1
+        degree[target] = degree.get(target, 0) + 1
+
+    focus_node_id = next(
+        (str(node.get("id")) for node in nodes if str(node.get("type")) == "Platform"),
+        None,
+    )
+    if not focus_node_id and nodes:
+        focus_node_id = str(
+            max(
+                nodes,
+                key=lambda node: degree.get(str(node.get("id")), 0),
+            ).get("id")
+        )
+
+    return {
+        "node_count": len(nodes),
+        "edge_count": len(edges),
+        "node_types": dict(sorted(node_types.items(), key=lambda item: (-item[1], item[0]))),
+        "edge_types": dict(sorted(edge_types.items(), key=lambda item: (-item[1], item[0]))),
+        "focus_node_id": focus_node_id,
+    }
+
+
+def _load_knowledge_graph_from_neo4j(*, max_nodes: int, max_edges: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    driver = get_driver()
+    label_allowlist = list(GRAPH_LABEL_ALLOWLIST)
+    node_map: dict[str, dict[str, Any]] = {}
+    edges: list[dict[str, Any]] = []
+    edge_ids: set[str] = set()
+
+    def upsert_node(*, element_id: str, labels: list[str] | tuple[str, ...], properties: dict[str, Any]) -> str:
+        props = dict(properties or {})
+        node_id = str(props.get("id") or element_id)
+        if node_id not in node_map and len(node_map) < max_nodes:
+            node_map[node_id] = _graph_node_payload(
+                node_id=node_id,
+                labels=list(labels or []),
+                properties=props,
+            )
+        return node_id
+
+    with driver.session(database=settings.NEO4J_DATABASE) as session:
+        edge_rows = session.run(
+            """
+            MATCH (a)-[r]->(b)
+            WHERE any(lbl IN labels(a) WHERE lbl IN $labels)
+              AND any(lbl IN labels(b) WHERE lbl IN $labels)
+            RETURN
+              elementId(a) AS source_element_id,
+              labels(a) AS source_labels,
+              properties(a) AS source_props,
+              elementId(b) AS target_element_id,
+              labels(b) AS target_labels,
+              properties(b) AS target_props,
+              elementId(r) AS rel_element_id,
+              type(r) AS rel_type,
+              properties(r) AS rel_props
+            LIMIT $max_edges
+            """,
+            labels=label_allowlist,
+            max_edges=max_edges,
+        ).data()
+
+        for row in edge_rows:
+            source = upsert_node(
+                element_id=str(row.get("source_element_id") or ""),
+                labels=row.get("source_labels") or [],
+                properties=row.get("source_props") or {},
+            )
+            target = upsert_node(
+                element_id=str(row.get("target_element_id") or ""),
+                labels=row.get("target_labels") or [],
+                properties=row.get("target_props") or {},
+            )
+            rel_type = str(row.get("rel_type") or "RELATED_TO")
+            rel_id = str(row.get("rel_element_id") or f"{source}:{rel_type}:{target}")
+            if rel_id in edge_ids:
+                continue
+            edge_ids.add(rel_id)
+            if source in node_map and target in node_map and len(edges) < max_edges:
+                rel_props = dict(row.get("rel_props") or {})
+                edges.append(
+                    {
+                        "id": rel_id,
+                        "source": source,
+                        "target": target,
+                        "type": rel_type,
+                        "properties": {
+                            key: value
+                            for key, value in rel_props.items()
+                            if isinstance(value, (str, int, float, bool)) or value is None
+                        },
+                    }
+                )
+
+        if len(node_map) < max_nodes:
+            node_rows = session.run(
+                """
+                MATCH (n)
+                WHERE any(lbl IN labels(n) WHERE lbl IN $labels)
+                RETURN elementId(n) AS element_id, labels(n) AS labels, properties(n) AS props
+                LIMIT $max_nodes
+                """,
+                labels=label_allowlist,
+                max_nodes=max_nodes,
+            ).data()
+            for row in node_rows:
+                upsert_node(
+                    element_id=str(row.get("element_id") or ""),
+                    labels=row.get("labels") or [],
+                    properties=row.get("props") or {},
+                )
+
+    nodes = list(node_map.values())[:max_nodes]
+    node_ids = {str(node.get("id")) for node in nodes}
+    filtered_edges = [
+        edge
+        for edge in edges
+        if str(edge.get("source")) in node_ids and str(edge.get("target")) in node_ids
+    ][:max_edges]
+    return nodes, filtered_edges
+
+
+def _load_knowledge_graph_from_postgres(
+    conn,
+    *,
+    max_nodes: int,
+    max_edges: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    node_map: dict[str, dict[str, Any]] = {}
+    edges: list[dict[str, Any]] = []
+    edge_ids: set[str] = set()
+
+    def add_node(*, node_id: str, node_type: str, label: str, properties: dict[str, Any] | None = None) -> str:
+        if node_id in node_map:
+            return node_id
+        if len(node_map) >= max_nodes:
+            return node_id
+        node_map[node_id] = {
+            "id": node_id,
+            "type": node_type,
+            "label": label[:72],
+            "properties": properties or {},
+        }
+        return node_id
+
+    def add_edge(*, source: str, target: str, edge_type: str, properties: dict[str, Any] | None = None):
+        if len(edges) >= max_edges:
+            return
+        if source not in node_map or target not in node_map:
+            return
+        edge_id = f"{source}:{edge_type}:{target}"
+        if edge_id in edge_ids:
+            return
+        edge_ids.add(edge_id)
+        edges.append(
+            {
+                "id": edge_id,
+                "source": source,
+                "target": target,
+                "type": edge_type,
+                "properties": properties or {},
+            }
+        )
+
+    platform_id = "platform:jubilant-ingrevia"
+    add_node(
+        node_id=platform_id,
+        node_type="Platform",
+        label="Jubilant Ingrevia Knowledge Fabric",
+        properties={"name": "Jubilant Ingrevia Knowledge Fabric"},
+    )
+
+    doc_rows = conn.execute(
+        text(
+            """
+            SELECT
+                d.id::text AS document_id,
+                d.code AS document_code,
+                d.title AS document_title,
+                dr.id::text AS revision_id,
+                dr.revision_label
+            FROM documents d
+            JOIN document_revisions dr ON dr.document_id = d.id
+            WHERE dr.is_latest_approved = true
+            ORDER BY d.updated_at DESC NULLS LAST, d.code
+            LIMIT :limit
+            """
+        ),
+        {"limit": max_nodes},
+    ).mappings()
+
+    for row in doc_rows:
+        document_id = str(row["document_id"])
+        revision_id = str(row["revision_id"])
+        document_code = str(row.get("document_code") or "")
+        document_title = str(row.get("document_title") or document_code or "Document")
+        revision_label = str(row.get("revision_label") or "Revision")
+
+        add_node(
+            node_id=document_id,
+            node_type="Document",
+            label=f"{document_code} {document_title}".strip(),
+            properties={
+                "id": document_id,
+                "code": document_code,
+                "title": document_title,
+            },
+        )
+        add_node(
+            node_id=revision_id,
+            node_type="DocumentRevision",
+            label=f"{document_code} {revision_label}".strip(),
+            properties={
+                "id": revision_id,
+                "revision_label": revision_label,
+                "document_id": document_id,
+                "document_code": document_code,
+            },
+        )
+        add_edge(source=platform_id, target=document_id, edge_type="HAS_DOCUMENT")
+        add_edge(source=document_id, target=revision_id, edge_type="HAS_REVISION")
+
+    module_rows = conn.execute(
+        text(
+            """
+            SELECT
+                tm.id::text AS module_id,
+                tm.title,
+                tm.source_document_id::text AS source_document_id,
+                tm.source_revision_id::text AS source_revision_id
+            FROM training_modules tm
+            ORDER BY tm.updated_at DESC NULLS LAST, tm.created_at DESC
+            LIMIT :limit
+            """
+        ),
+        {"limit": max_nodes},
+    ).mappings()
+
+    for row in module_rows:
+        module_id = str(row["module_id"])
+        source_document_id = row.get("source_document_id")
+        source_revision_id = row.get("source_revision_id")
+        module_title = str(row.get("title") or "Training Module")
+        add_node(
+            node_id=module_id,
+            node_type="TrainingModule",
+            label=module_title,
+            properties={
+                "id": module_id,
+                "title": module_title,
+                "source_document_id": source_document_id,
+                "source_revision_id": source_revision_id,
+            },
+        )
+        if source_revision_id and str(source_revision_id) in node_map:
+            add_edge(
+                source=str(source_revision_id),
+                target=module_id,
+                edge_type="DERIVES_TO_TRAINING",
+            )
+        elif source_document_id and str(source_document_id) in node_map:
+            add_edge(
+                source=str(source_document_id),
+                target=module_id,
+                edge_type="DERIVES_TO_TRAINING",
+            )
+        else:
+            add_edge(source=platform_id, target=module_id, edge_type="HAS_MODULE")
+
+    assessment_rows = conn.execute(
+        text(
+            """
+            SELECT
+                a.id::text AS assessment_id,
+                a.title AS assessment_title,
+                a.module_id::text AS module_id
+            FROM assessments a
+            ORDER BY a.created_at DESC
+            LIMIT :limit
+            """
+        ),
+        {"limit": max_nodes},
+    ).mappings()
+
+    for row in assessment_rows:
+        assessment_id = str(row["assessment_id"])
+        module_id = str(row["module_id"])
+        assessment_title = str(row.get("assessment_title") or "Assessment")
+        add_node(
+            node_id=assessment_id,
+            node_type="Assessment",
+            label=assessment_title,
+            properties={
+                "id": assessment_id,
+                "title": assessment_title,
+                "module_id": module_id,
+            },
+        )
+        if module_id in node_map:
+            add_edge(source=assessment_id, target=module_id, edge_type="TESTS_MODULE")
+
+    assignment_rows = conn.execute(
+        text(
+            """
+            SELECT
+                ta.user_id::text AS user_id,
+                u.full_name,
+                u.role,
+                d.name AS department_name,
+                ta.module_id::text AS module_id,
+                ta.status
+            FROM training_assignments ta
+            JOIN users u ON u.id = ta.user_id
+            LEFT JOIN departments d ON d.id = u.department_id
+            ORDER BY ta.updated_at DESC NULLS LAST, ta.created_at DESC
+            LIMIT :limit
+            """
+        ),
+        {"limit": max_edges},
+    ).mappings()
+
+    for row in assignment_rows:
+        user_id = str(row["user_id"])
+        module_id = str(row["module_id"])
+        full_name = str(row.get("full_name") or "User")
+        role = str(row.get("role") or "operator")
+        department_name = row.get("department_name")
+        add_node(
+            node_id=user_id,
+            node_type="User",
+            label=full_name,
+            properties={
+                "id": user_id,
+                "full_name": full_name,
+                "role": role,
+                "department": department_name,
+            },
+        )
+        if module_id in node_map:
+            add_edge(
+                source=module_id,
+                target=user_id,
+                edge_type="ASSIGNED_TO",
+                properties={"status": row.get("status")},
+            )
+
+    return list(node_map.values())[:max_nodes], edges[:max_edges]
+
+
 @app.get("/api/retrieval/status")
 async def retrieval_status():
     pg_counts = {}
@@ -1238,16 +2854,93 @@ async def retrieval_status():
         }.items():
             pg_counts[label] = int(conn.execute(text(sql)).scalar_one())
 
-    graph = check_neo4j_connection()
+    graph_status: dict[str, Any]
+    overall_status = "ok"
+    try:
+        graph = check_neo4j_connection()
+        graph_status = {
+            "status": graph.get("status", "ok"),
+            "database": graph.get("database"),
+            "server_time": graph.get("server_time"),
+            "uri": graph.get("uri"),
+            "error": None,
+        }
+    except Exception as exc:
+        overall_status = "degraded"
+        graph_status = {
+            "status": "unavailable",
+            "database": settings.NEO4J_DATABASE,
+            "server_time": None,
+            "uri": settings.NEO4J_URI,
+            "error": str(exc),
+        }
+
     return {
-        "status": "ok",
+        "status": overall_status,
         "postgres": pg_counts,
-        "neo4j": {
-            "database": graph["database"],
-            "server_time": graph["server_time"],
-            "uri": graph["uri"],
-        },
+        "neo4j": graph_status,
         "embedding_model": settings.EMBEDDING_MODEL,
+    }
+
+
+@app.get("/api/admin/graph/overview")
+async def admin_graph_overview(
+    user_id: str,
+    max_nodes: int = 180,
+    max_edges: int = 360,
+):
+    bounded_nodes = max(40, min(max_nodes, 240))
+    bounded_edges = max(80, min(max_edges, 640))
+
+    with engine.connect() as conn:
+        user = _get_user(conn, user_id)
+        _require_admin(user)
+        fallback_nodes, fallback_edges = _load_knowledge_graph_from_postgres(
+            conn,
+            max_nodes=bounded_nodes,
+            max_edges=bounded_edges,
+        )
+
+    diagnostics: dict[str, Any] = {}
+    response_status = "degraded"
+    graph_source = "postgres_fallback"
+    nodes = fallback_nodes
+    edges = fallback_edges
+
+    if settings.has_graph_credentials:
+        try:
+            neo_nodes, neo_edges = _load_knowledge_graph_from_neo4j(
+                max_nodes=bounded_nodes,
+                max_edges=bounded_edges,
+            )
+            if neo_nodes:
+                nodes = neo_nodes
+                edges = neo_edges
+                response_status = "ok"
+                graph_source = "neo4j"
+            else:
+                diagnostics["neo4j"] = "empty_graph"
+        except Exception as exc:
+            diagnostics["neo4j_error"] = str(exc)
+    else:
+        diagnostics["neo4j"] = "credentials_missing"
+
+    summary = _graph_summary(nodes, edges)
+    if not nodes:
+        response_status = "empty"
+    elif graph_source == "postgres_fallback" and not diagnostics:
+        diagnostics["neo4j"] = "fallback_used"
+
+    return {
+        "status": response_status,
+        "source": graph_source,
+        "summary": summary,
+        "graph": {
+            "nodes": nodes,
+            "edges": edges,
+            "focus_node_id": summary.get("focus_node_id"),
+        },
+        "diagnostics": diagnostics,
     }
 
 
@@ -2190,10 +3883,97 @@ async def admin_reporting_overview(user_id: str):
     }
 
 
+@app.get("/api/admin/guardrail/incidents")
+async def admin_guardrail_incidents(user_id: str, limit: int = 20):
+    safe_limit = max(1, min(int(limit or 20), 200))
+    with engine.connect() as conn:
+        user = _get_user(conn, user_id)
+        _require_admin_or_supervisor(user)
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT
+                        aal.id::text AS incident_id,
+                        aal.actor_user_id::text AS actor_user_id,
+                        u.full_name AS actor_name,
+                        u.role AS actor_role,
+                        aal.target_type,
+                        aal.target_id,
+                        aal.details,
+                        aal.created_at
+                    FROM admin_audit_logs aal
+                    LEFT JOIN users u ON u.id = aal.actor_user_id
+                    WHERE aal.action = 'guardrail_blocked_query'
+                    ORDER BY aal.created_at DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"limit": safe_limit},
+            ).mappings()
+        ]
+
+    incidents = []
+    counts_by_category: dict[str, int] = {}
+    for row in rows:
+        details = row.get("details") or {}
+        if not isinstance(details, dict):
+            details = {}
+        category = str(details.get("category") or "unknown")
+        counts_by_category[category] = counts_by_category.get(category, 0) + 1
+        incidents.append(
+            {
+                "incident_id": row["incident_id"],
+                "actor_user_id": row.get("actor_user_id"),
+                "actor_name": row.get("actor_name"),
+                "actor_role": row.get("actor_role"),
+                "target_type": row.get("target_type"),
+                "target_id": row.get("target_id"),
+                "category": category,
+                "reason": details.get("reason"),
+                "severity": details.get("severity") or "medium",
+                "channel": details.get("channel"),
+                "query_excerpt": details.get("query_excerpt"),
+                "matched_terms": details.get("matched_terms") or [],
+                "conversation_id": details.get("conversation_id"),
+                "created_at": _iso(row.get("created_at")),
+            }
+        )
+
+    return {
+        "incidents": incidents,
+        "summary": {
+            "total": len(incidents),
+            "counts_by_category": counts_by_category,
+        },
+    }
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     _require_secret(settings.GROQ_API_KEY, "GROQ_API_KEY")
     _require_secret(settings.SARVAM_API_KEY, "SARVAM_API_KEY")
+
+    guardrail_decision = evaluate_guardrail(req.text)
+    if guardrail_decision.blocked:
+        with engine.begin() as conn:
+            _notify_guardrail_violation(
+                conn,
+                user_id=None,
+                query_text=req.text,
+                decision=guardrail_decision,
+                channel="chat",
+                conversation_id=None,
+            )
+        return ChatResponse(
+            user_text=req.text,
+            assistant_text=guardrail_decision.user_message,
+            assistant_tts_text=guardrail_decision.user_message,
+            audio_base64="",
+            audio_mime_type="audio/wav",
+            citations=[],
+        )
 
     retrieval_result = retriever.query(
         query_text=req.text,
@@ -2239,6 +4019,8 @@ async def chat(req: ChatRequest):
             bbox_y0=chunk.get("bbox_y0"),
             bbox_x1=chunk.get("bbox_x1"),
             bbox_y1=chunk.get("bbox_y1"),
+            line_start=chunk.get("line_start"),
+            line_end=chunk.get("line_end"),
         ))
 
     context = "\n\n".join(context_parts)
@@ -2293,14 +4075,24 @@ Context from documents:
     assistant_tts_text = assistant_text
     if settings.SARVAM_API_KEY and assistant_text:
         async with httpx.AsyncClient(timeout=45.0) as client:
-            assistant_tts_text, tts_language = await _translate_assistant_text(client, assistant_text, req.language)
-            audio_base64 = await _synthesize_speech(client, assistant_tts_text, tts_language, req.speaker)
+            try:
+                assistant_tts_text, tts_language = await _translate_assistant_text(
+                    client, assistant_text, req.language
+                )
+                audio_base64 = await _synthesize_speech(
+                    client, assistant_tts_text, tts_language, req.speaker
+                )
+            except Exception as exc:
+                print(f"TTS synthesis failed in /api/chat: {exc}")
+                assistant_tts_text = _prepare_tts_text(assistant_text)
+                audio_base64 = ""
 
     return ChatResponse(
         user_text=req.text,
         assistant_text=assistant_text,
         assistant_tts_text=assistant_tts_text,
         audio_base64=audio_base64,
+        audio_mime_type="audio/wav",
         citations=citations
     )
 
@@ -2311,33 +4103,192 @@ async def speech_to_text(audio: UploadFile = File(...), language: str = Form("au
     audio_bytes = await audio.read()
 
     async with httpx.AsyncClient(timeout=45.0) as client:
-        transcript, detected_language = await _translate_speech_to_english(client, audio_bytes, language)
+        spoken_text, normalized_text, detected_language = await _prepare_voice_query(
+            client,
+            audio_bytes,
+            language,
+            audio.filename,
+            audio.content_type,
+        )
 
-    return {"text": transcript, "language": detected_language, "detected_language": detected_language}
+    return {
+        "text": spoken_text,
+        "normalized_text": normalized_text,
+        "language": detected_language,
+        "detected_language": detected_language,
+    }
 
 
 @app.post("/api/voice")
-async def voice_pipeline(audio: UploadFile = File(...), language: str = Form("auto"), speaker: str = Form("meera")):
+async def voice_pipeline(
+    audio: UploadFile = File(...),
+    language: str = Form("auto"),
+    speaker: str = Form(DEFAULT_TTS_SPEAKER),
+    user_id: str | None = Form(None),
+    conversation_id: str | None = Form(None),
+    chat_scope: str = Form("general"),
+):
     _require_secret(settings.GROQ_API_KEY, "GROQ_API_KEY")
     _require_secret(settings.SARVAM_API_KEY, "SARVAM_API_KEY")
 
+    if conversation_id and not user_id:
+        raise HTTPException(status_code=400, detail="user_id is required with conversation_id")
+
+    normalized_scope = _normalize_chat_scope(chat_scope)
     audio_bytes = await audio.read()
 
-    async with httpx.AsyncClient(timeout=45.0) as client:
-        user_text, detected_language = await _translate_speech_to_english(client, audio_bytes, language)
+    history: list[dict[str, str]] = []
+    if user_id:
+        with engine.connect() as conn:
+            _get_user(conn, user_id)
+            if conversation_id:
+                conversation_scope = _detect_chat_scope_for_conversation(
+                    conn, conversation_id, user_id
+                )
+                if not conversation_scope:
+                    raise HTTPException(status_code=404, detail="Conversation not found")
+                if conversation_scope != normalized_scope:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "Conversation scope mismatch. "
+                            f"Expected '{normalized_scope}', found '{conversation_scope}'."
+                        ),
+                    )
+                history = _history_from_messages(
+                    _get_chat_messages(conn, conversation_id, chat_scope=normalized_scope)
+                )
 
-    if not user_text.strip():
-        raise HTTPException(status_code=400, detail="Could not understand speech")
+    async with httpx.AsyncClient(timeout=45.0) as client:
+        spoken_text, normalized_query, detected_language = await _prepare_voice_query(
+            client,
+            audio_bytes,
+            language,
+            audio.filename,
+            audio.content_type,
+        )
+
+    if not spoken_text.strip():
+        assistant_text = _voice_not_understood_message(detected_language or language)
+        tts_language = _get_tts_language(detected_language or DEFAULT_TTS_LANGUAGE)
+        return {
+            "user_text": "",
+            "normalized_query": "",
+            "assistant_text": assistant_text,
+            "assistant_tts_text": assistant_text,
+            "audio_base64": "",
+            "audio_mime_type": "audio/wav",
+            "detected_language": detected_language,
+            "tts_language": tts_language,
+            "citations": [],
+            "conversation_id": conversation_id,
+            "stt_status": "empty_transcript",
+        }
+
+    guardrail_decision = evaluate_guardrail(spoken_text)
+    if guardrail_decision.blocked:
+        assistant_text = guardrail_decision.user_message
+        if user_id:
+            with engine.begin() as conn:
+                _get_user(conn, user_id)
+                if conversation_id:
+                    _get_chat_conversation(
+                        conn,
+                        conversation_id,
+                        user_id,
+                        chat_scope=normalized_scope,
+                    )
+                else:
+                    conversation = _create_chat_conversation(
+                        conn,
+                        user_id=user_id,
+                        language=detected_language,
+                        title=_conversation_title_from_query(spoken_text),
+                        chat_scope=normalized_scope,
+                    )
+                    conversation_id = conversation["id"]
+
+                _append_chat_message(
+                    conn,
+                    conversation_id=conversation_id,
+                    role="user",
+                    content=spoken_text,
+                    language=detected_language,
+                    response_mode="voice",
+                    chat_scope=normalized_scope,
+                )
+                _append_chat_message(
+                    conn,
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=assistant_text,
+                    language=detected_language,
+                    response_mode="voice",
+                    chat_scope=normalized_scope,
+                )
+                _notify_guardrail_violation(
+                    conn,
+                    user_id=user_id,
+                    query_text=spoken_text,
+                    decision=guardrail_decision,
+                    channel="voice",
+                    conversation_id=conversation_id,
+                )
+        else:
+            with engine.begin() as conn:
+                _notify_guardrail_violation(
+                    conn,
+                    user_id=None,
+                    query_text=spoken_text,
+                    decision=guardrail_decision,
+                    channel="voice",
+                    conversation_id=None,
+                )
+
+        return {
+            "user_text": spoken_text,
+            "normalized_query": spoken_text,
+            "assistant_text": assistant_text,
+            "assistant_tts_text": assistant_text,
+            "audio_base64": "",
+            "audio_mime_type": "audio/wav",
+            "detected_language": detected_language,
+            "tts_language": _get_tts_language(detected_language),
+            "citations": [],
+            "conversation_id": conversation_id,
+            "guardrail": _guardrail_diagnostics(guardrail_decision),
+        }
+
+    contextual_query = _build_contextual_query(normalized_query or spoken_text, history)
+    rewritten_query = contextual_query
+    rewrite_result = rewrite_query_with_dspy(
+        contextual_query,
+        language=detected_language,
+        role="reader_copilot" if normalized_scope == "reader" else "operator",
+        history=history,
+    )
+    if rewrite_result and rewrite_result.get("rewritten_query"):
+        rewritten_query = rewrite_result["rewritten_query"]
+
+    effective_top_k = 5
+    if normalized_scope == "reader" and _is_summary_style_query(spoken_text):
+        effective_top_k = 12
 
     retrieval_result = retriever.query(
-        query_text=user_text,
+        query_text=rewritten_query,
         language=detected_language,
         role="operator",
-        user_id=None,
-        top_k=5,
+        user_id=user_id,
+        top_k=effective_top_k,
     )
     evidence = retrieval_result.get("evidence", [])
-    assistant_text = await _generate_grounded_answer(user_text, detected_language, evidence)
+    assistant_text = await _generate_grounded_answer(
+        spoken_text,
+        detected_language,
+        evidence,
+        history=history,
+        chat_scope=normalized_scope,
+    )
     citations = [
         Citation(
             chunk_id=chunk.get("chunk_id", ""),
@@ -2355,22 +4306,81 @@ async def voice_pipeline(audio: UploadFile = File(...), language: str = Form("au
             bbox_y0=chunk.get("bbox_y0"),
             bbox_x1=chunk.get("bbox_x1"),
             bbox_y1=chunk.get("bbox_y1"),
+            line_start=chunk.get("line_start"),
+            line_end=chunk.get("line_end"),
         ).model_dump()
         for chunk in evidence[:4]
     ]
+    retrieval_event_id = retrieval_result.get("retrieval_event_id") or retrieval_result.get("event_id")
 
+    audio_base64 = ""
+    assistant_tts_text = _prepare_tts_text(assistant_text)
+    tts_language = _get_tts_language(detected_language)
     async with httpx.AsyncClient(timeout=45.0) as client:
-        assistant_tts_text, tts_language = await _translate_assistant_text(client, assistant_text, detected_language)
-        audio_base64 = await _synthesize_speech(client, assistant_tts_text, tts_language, speaker)
+        try:
+            assistant_tts_text, tts_language = await _translate_assistant_text(
+                client, assistant_text, detected_language
+            )
+            audio_base64 = await _synthesize_speech(
+                client, assistant_tts_text, tts_language, speaker
+            )
+        except Exception as exc:
+            print(f"TTS synthesis failed in /api/voice: {exc}")
+
+    if user_id:
+        with engine.begin() as conn:
+            _get_user(conn, user_id)
+            if conversation_id:
+                _get_chat_conversation(
+                    conn,
+                    conversation_id,
+                    user_id,
+                    chat_scope=normalized_scope,
+                )
+            else:
+                conversation = _create_chat_conversation(
+                    conn,
+                    user_id=user_id,
+                    language=detected_language,
+                    title=_conversation_title_from_query(spoken_text),
+                    chat_scope=normalized_scope,
+                )
+                conversation_id = conversation["id"]
+
+            _append_chat_message(
+                conn,
+                conversation_id=conversation_id,
+                role="user",
+                content=spoken_text,
+                language=detected_language,
+                query_text=rewritten_query,
+                response_mode="voice",
+                chat_scope=normalized_scope,
+            )
+            _append_chat_message(
+                conn,
+                conversation_id=conversation_id,
+                role="assistant",
+                content=assistant_text,
+                language=detected_language,
+                citations=citations,
+                query_text=rewritten_query,
+                retrieval_event_id=retrieval_event_id,
+                response_mode="voice",
+                chat_scope=normalized_scope,
+            )
 
     return {
-        "user_text": user_text,
+        "user_text": spoken_text,
+        "normalized_query": rewritten_query,
         "assistant_text": assistant_text,
         "assistant_tts_text": assistant_tts_text,
         "audio_base64": audio_base64,
+        "audio_mime_type": "audio/wav",
         "detected_language": detected_language,
         "tts_language": tts_language,
         "citations": citations,
+        "conversation_id": conversation_id,
     }
 
 

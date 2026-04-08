@@ -5,10 +5,9 @@ import Link from 'next/link';
 import { AdminLayout } from '@/components/admin/admin-layout';
 import { Card, KpiCard } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { apiClient } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
-import { DocumentStackIcon, UsersClusterIcon, AnalyticsBarsIcon } from '@/components/ui/icons';
+import { DocumentStackIcon, UsersClusterIcon, AnalyticsBarsIcon, LookupNodesIcon } from '@/components/ui/icons';
 
 type DashboardSummary = {
   stats: {
@@ -215,6 +214,15 @@ export default function AdminHome() {
                       <div>
                         <p className="text-sm font-semibold text-foreground">Analytics Workspace</p>
                         <p className="mt-1 text-xs text-muted">Deep readiness, reporting, and usage breakdowns.</p>
+                      </div>
+                    </div>
+                  </Link>
+                  <Link href="/admin/graph" className="block">
+                    <div className="flex items-start gap-3 rounded-[4px] border border-border px-4 py-4 transition-colors hover:border-secondary hover:bg-secondary/5">
+                      <LookupNodesIcon className="mt-0.5 text-primary" />
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">Knowledge Graph</p>
+                        <p className="mt-1 text-xs text-muted">Explore connected SOP entities with live node navigation.</p>
                       </div>
                     </div>
                   </Link>

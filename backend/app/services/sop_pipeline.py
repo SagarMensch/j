@@ -1,8 +1,13 @@
+import base64
 import re
+import shutil
+import subprocess
 import uuid
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+import httpx
 
 from app.core.config import get_settings
 
@@ -305,6 +310,115 @@ def _ocr_blocks_from_image(image, page_number: int) -> tuple[list[dict[str, Any]
     return blocks, avg_conf
 
 
+def _ocr_blocks_from_image_path_tesseract(
+    image_path: str,
+    page_number: int,
+) -> tuple[list[dict[str, Any]], float | None]:
+    tesseract_path = shutil.which("tesseract")
+    if not tesseract_path:
+        return [], None
+
+    result = subprocess.run(
+        [
+            tesseract_path,
+            image_path,
+            "stdout",
+            "--psm",
+            "6",
+            "tsv",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    if len(lines) <= 1:
+        return [], None
+
+    headers = lines[0].split("\t")
+    grouped: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    confidences: list[float] = []
+
+    for row in lines[1:]:
+        parts = row.split("\t")
+        if len(parts) != len(headers):
+            continue
+        item = dict(zip(headers, parts))
+        text = (item.get("text") or "").strip()
+        if not text:
+            continue
+        try:
+            conf = float(item.get("conf") or "-1")
+        except ValueError:
+            conf = -1
+        if conf < 0:
+            continue
+
+        key = (
+            item.get("block_num", "0"),
+            item.get("par_num", "0"),
+            item.get("line_num", "0"),
+            item.get("page_num", "1"),
+        )
+        left = int(item.get("left") or 0)
+        top = int(item.get("top") or 0)
+        width = int(item.get("width") or 0)
+        height = int(item.get("height") or 0)
+        right = left + width
+        bottom = top + height
+
+        bucket = grouped.setdefault(
+            key,
+            {
+                "text_parts": [],
+                "left": left,
+                "top": top,
+                "right": right,
+                "bottom": bottom,
+                "confidences": [],
+            },
+        )
+        bucket["text_parts"].append(text)
+        bucket["left"] = min(bucket["left"], left)
+        bucket["top"] = min(bucket["top"], top)
+        bucket["right"] = max(bucket["right"], right)
+        bucket["bottom"] = max(bucket["bottom"], bottom)
+        bucket["confidences"].append(conf)
+        confidences.append(conf)
+
+    blocks: list[dict[str, Any]] = []
+    for reading_order, bucket in enumerate(grouped.values()):
+        line_text = " ".join(bucket["text_parts"]).strip()
+        if not line_text:
+            continue
+        avg_conf = (
+            sum(bucket["confidences"]) / len(bucket["confidences"])
+            if bucket["confidences"]
+            else None
+        )
+        blocks.append(
+            {
+                "block_id": str(uuid.uuid4()),
+                "page_number": page_number,
+                "block_type": "paragraph",
+                "section_title": None,
+                "text": line_text,
+                "bbox": {
+                    "left": float(bucket["left"]),
+                    "top": float(bucket["top"]),
+                    "right": float(bucket["right"]),
+                    "bottom": float(bucket["bottom"]),
+                },
+                "confidence": avg_conf,
+                "reading_order": reading_order,
+            }
+        )
+
+    page_conf = sum(confidences) / len(confidences) if confidences else None
+    return blocks, page_conf
+
+
 def _blocks_from_text(text: str, *, page_number: int = 1) -> list[dict[str, Any]]:
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
     blocks = []
@@ -322,6 +436,168 @@ def _blocks_from_text(text: str, *, page_number: int = 1) -> list[dict[str, Any]
             }
         )
     return blocks
+
+
+def _extract_pdf_page_blocks(file_path: str) -> list[dict[str, Any]]:
+    try:
+        import fitz
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "PyMuPDF is required for PDF block extraction. Install backend requirements to continue."
+        ) from exc
+
+    doc = fitz.open(file_path)
+    pages: list[dict[str, Any]] = []
+    for page_number, page in enumerate(doc, start=1):
+        page_blocks: list[dict[str, Any]] = []
+        raw_parts: list[str] = []
+        reading_order = 0
+        for block in page.get_text("blocks"):
+            if len(block) < 5:
+                continue
+            x0, y0, x1, y1, text = block[:5]
+            block_text = (text or "").strip()
+            if not block_text:
+                continue
+            raw_parts.append(block_text)
+            page_blocks.append(
+                {
+                    "block_id": str(uuid.uuid4()),
+                    "page_number": page_number,
+                    "block_type": "paragraph",
+                    "section_title": None,
+                    "text": block_text,
+                    "bbox": {
+                        "left": float(x0),
+                        "top": float(y0),
+                        "right": float(x1),
+                        "bottom": float(y1),
+                    },
+                    "confidence": None,
+                    "reading_order": reading_order,
+                }
+            )
+            reading_order += 1
+        pages.append(
+            {
+                "page_number": page_number,
+                "raw_text": "\n".join(raw_parts).strip(),
+                "blocks": page_blocks,
+            }
+        )
+    return pages
+
+
+def _should_use_vlm_page_fallback(
+    page_text: str,
+    avg_confidence: float | None,
+    *,
+    settings,
+) -> bool:
+    text_chars = len((page_text or "").strip())
+    if text_chars < settings.SOP_OCR_MIN_TEXT_CHARS:
+        return True
+    if avg_confidence is None:
+        return False
+    return avg_confidence < settings.SOP_OCR_CONFIDENCE_FLOOR
+
+
+def _image_path_to_data_url(image_path: str) -> str:
+    suffix = Path(image_path).suffix.lower()
+    media_type = "image/png" if suffix == ".png" else "image/jpeg"
+    encoded = base64.b64encode(Path(image_path).read_bytes()).decode("utf-8")
+    return f"data:{media_type};base64,{encoded}"
+
+
+def _extract_scanned_page_with_openrouter(image_path: str, page_number: int) -> str:
+    settings = get_settings()
+    if not settings.has_openrouter_credentials:
+        return ""
+
+    prompt = (
+        "Extract the page into faithful markdown for SOP ingestion. "
+        "Preserve headings, numbered steps, warnings, cautions, tables, and units. "
+        "Do not summarize. Do not infer missing text. Return only markdown."
+    )
+    payload = {
+        "model": settings.OPENROUTER_VLM_MODEL,
+        "temperature": 0,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": f"{prompt}\n\nPage number: {page_number}"},
+                    {"type": "image_url", "image_url": {"url": _image_path_to_data_url(image_path)}},
+                ],
+            }
+        ],
+    }
+
+    headers = {
+        "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    with httpx.Client(timeout=90.0) as client:
+        response = client.post(settings.OPENROUTER_BASE_URL, headers=headers, json=payload)
+        response.raise_for_status()
+        data = response.json()
+
+    content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+    if isinstance(content, list):
+        return "\n".join(
+            part.get("text", "").strip()
+            for part in content
+            if isinstance(part, dict) and part.get("text")
+        ).strip()
+    return str(content).strip()
+
+
+def _normalize_page_markdown_with_mistral(page_text: str, page_number: int) -> str:
+    settings = get_settings()
+    if not settings.has_mistral_credentials or not page_text.strip():
+        return page_text
+
+    payload = {
+        "model": settings.MISTRAL_MODEL,
+        "temperature": 0,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You clean OCR text for SOP ingestion. Preserve meaning exactly, keep markdown, "
+                    "fix obvious OCR artefacts, and do not add missing instructions."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Clean this SOP page extracted text for page {page_number}. "
+                    "Return only corrected markdown.\n\n"
+                    f"{page_text}"
+                ),
+            },
+        ],
+    }
+
+    headers = {
+        "Authorization": f"Bearer {settings.MISTRAL_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    with httpx.Client(timeout=60.0) as client:
+        response = client.post(
+            f"{settings.MISTRAL_BASE_URL}/chat/completions",
+            headers=headers,
+            json=payload,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+    return (
+        data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        or page_text
+    )
 
 
 def _extract_pdf_page_texts(file_path: str) -> list[str]:
@@ -421,24 +697,73 @@ def process_document(file_path: str, doc_id: str, revision_id: str) -> dict[str,
     if ext == ".pdf":
         docling_text = extract_text_from_pdf_docling(file_path) or ""
         docling_ok = len(docling_text.strip()) > 200
+        try:
+            page_texts = _extract_pdf_page_texts(file_path)
+        except Exception as exc:
+            print(f"PyPDF page extraction failed: {exc}")
+            page_texts = []
+        try:
+            digital_pages = _extract_pdf_page_blocks(file_path)
+        except Exception as exc:
+            print(f"PyMuPDF block extraction failed: {exc}")
+            digital_pages = []
+        digital_text_chars = sum(len((text or "").strip()) for text in page_texts)
+        pdf_text_ok = digital_text_chars > 300
         if docling_ok:
             docling_path = output_dir / "docling.md"
             docling_path.write_text(docling_text, encoding="utf-8")
         else:
             docling_path = None
-        classification = "digital" if docling_ok else "scanned"
+        classification = "digital" if docling_ok or pdf_text_ok else "scanned"
         ocr_mode = (settings.SOP_OCR_MODE or "auto").lower()
         if ocr_mode not in {"auto", "always", "never"}:
             ocr_mode = "auto"
-        needs_ocr = ocr_mode == "always" or (ocr_mode == "auto" and not docling_ok)
+        needs_ocr = ocr_mode == "always" or (ocr_mode == "auto" and not (docling_ok or pdf_text_ok))
         render_dpi = settings.SOP_OCR_DPI if needs_ocr else settings.SOP_PDF_RENDER_DPI
 
         rendered_pages = _render_pdf_images(file_path, output_dir / "pages", dpi=render_dpi)
 
         if needs_ocr:
+            vlm_pages_used = 0
             for page in rendered_pages:
-                page_blocks, avg_conf = _ocr_blocks_from_image(page["image"], page["page_number"])
+                try:
+                    page_blocks, avg_conf = _ocr_blocks_from_image(page["image"], page["page_number"])
+                except Exception as exc:
+                    print(f"PaddleOCR page extraction failed for page {page['page_number']}: {exc}")
+                    page_blocks, avg_conf = [], None
+                if not page_blocks:
+                    try:
+                        page_blocks, avg_conf = _ocr_blocks_from_image_path_tesseract(
+                            page["image_path"], page["page_number"]
+                        )
+                    except Exception as exc:
+                        print(
+                            f"Tesseract page extraction failed for page {page['page_number']}: {exc}"
+                        )
+                        page_blocks, avg_conf = [], None
                 raw_text = "\n".join(b["text"] for b in page_blocks if b.get("text"))
+                if (
+                    vlm_pages_used < settings.SOP_VLM_PAGE_LIMIT
+                    and _should_use_vlm_page_fallback(raw_text, avg_conf, settings=settings)
+                ):
+                    try:
+                        vlm_text = _extract_scanned_page_with_openrouter(
+                            page["image_path"], page["page_number"]
+                        )
+                    except Exception as exc:
+                        print(f"OpenRouter page extraction failed for page {page['page_number']}: {exc}")
+                        vlm_text = ""
+                    if vlm_text.strip():
+                        try:
+                            vlm_text = _normalize_page_markdown_with_mistral(
+                                vlm_text, page["page_number"]
+                            )
+                        except Exception as exc:
+                            print(f"Mistral page cleanup failed for page {page['page_number']}: {exc}")
+                        raw_text = vlm_text
+                        page_blocks = _blocks_from_text(vlm_text, page_number=page["page_number"])
+                        avg_conf = avg_conf if avg_conf is not None else 0.0
+                        vlm_pages_used += 1
                 total_text_chars += len(raw_text)
                 pages.append(
                     {
@@ -454,11 +779,21 @@ def process_document(file_path: str, doc_id: str, revision_id: str) -> dict[str,
                     }
                 )
         else:
-            page_texts = _extract_pdf_page_texts(file_path)
             for page in rendered_pages:
                 page_number = page["page_number"]
-                text = page_texts[page_number - 1] if page_number - 1 < len(page_texts) else ""
-                blocks = _blocks_from_text(text, page_number=page_number) if text.strip() else []
+                digital_page = (
+                    digital_pages[page_number - 1]
+                    if page_number - 1 < len(digital_pages)
+                    else None
+                )
+                text = (
+                    (digital_page or {}).get("raw_text")
+                    or (page_texts[page_number - 1] if page_number - 1 < len(page_texts) else "")
+                )
+                blocks = (
+                    (digital_page or {}).get("blocks")
+                    or (_blocks_from_text(text, page_number=page_number) if text.strip() else [])
+                )
                 total_text_chars += len(text)
                 pages.append(
                     {

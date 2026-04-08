@@ -112,6 +112,14 @@ const COPY: Record<AppLanguage, LayoutCopy> = {
 };
 
 function currentSection(pathname: string | null, language: AppLanguage) {
+  if (
+    pathname === "/operator" ||
+    pathname?.startsWith("/operator/reader") ||
+    pathname?.startsWith("/operator/knowledge")
+  ) {
+    return COPY[language].nav.lookup;
+  }
+
   const selected =
     NAV_ITEMS.find(
       (item) =>
@@ -391,8 +399,11 @@ export function OperatorLayout({ children }: { children: React.ReactNode }) {
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {NAV_ITEMS.map((item) => {
               const isActive =
-                pathname === item.href ||
-                (item.href !== "/operator" && pathname?.startsWith(item.href));
+                item.key === "lookup"
+                  ? pathname === item.href ||
+                    pathname?.startsWith("/operator/reader") ||
+                    pathname?.startsWith("/operator/knowledge")
+                  : pathname === item.href || pathname?.startsWith(item.href);
               return (
                 <Link
                   key={item.href}

@@ -1,10 +1,16 @@
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
+
+from app.core.config import get_settings
 
 try:
     import dspy
 except ImportError:  # pragma: no cover - optional until dependencies are installed
     dspy = None
+
+
+settings = get_settings()
 
 
 def ensure_dspy():
@@ -44,6 +50,7 @@ def build_signatures():
         """Convert an operator question into a retrieval-focused search query."""
 
         question = dsp.InputField()
+        history = dsp.InputField()
         language = dsp.InputField()
         role = dsp.InputField()
         rewritten_query = dsp.OutputField()
@@ -53,6 +60,7 @@ def build_signatures():
         """Answer only from approved SOP/SMP/WID context and cite the evidence."""
 
         question = dsp.InputField()
+        history = dsp.InputField()
         language = dsp.InputField()
         role = dsp.InputField()
         context = dsp.InputField()
@@ -121,7 +129,12 @@ class GroundedPlantAssistant:
         self.verify = dsp.ChainOfThought(signatures["verify_grounding"])
 
     def forward(self, question: str, language: str = "en", role: str = "operator"):
-        rewritten = self.rewrite(question=question, language=language, role=role)
+        rewritten = self.rewrite(
+            question=question,
+            history="",
+            language=language,
+            role=role,
+        )
         passages = self.retriever.search(
             query=rewritten.rewritten_query,
             top_k=5,
@@ -134,6 +147,7 @@ class GroundedPlantAssistant:
         )
         drafted = self.answer(
             question=question,
+            history="",
             language=language,
             role=role,
             context=context,
@@ -195,3 +209,177 @@ class TrainingAndAssessmentFactory:
             learning_summary=learning_summary,
             language=language,
         )
+
+
+@lru_cache()
+def _get_dspy_lm():
+    dsp = ensure_dspy()
+    if not settings.GROQ_API_KEY:
+        raise RuntimeError("GROQ_API_KEY is required for DSPy reasoning.")
+    lm = dsp.LM(
+        f"openai/{settings.GROQ_MODEL}",
+        api_key=settings.GROQ_API_KEY,
+        api_base="https://api.groq.com/openai/v1",
+        cache=False,
+    )
+    dsp.configure(lm=lm)
+    return lm
+
+
+def _history_to_text(history: list[dict[str, str]] | None) -> str:
+    if not history:
+        return "No prior conversation."
+    lines: list[str] = []
+    for item in history[-8:]:
+        role = (item.get("role") or "user").strip().title()
+        content = (item.get("content") or "").strip()
+        if content:
+            lines.append(f"{role}: {content}")
+    return "\n".join(lines) if lines else "No prior conversation."
+
+
+def _evidence_to_context(evidence: list[dict[str, Any]]) -> str:
+    if not evidence:
+        return "No approved evidence found."
+    blocks: list[str] = []
+    for index, item in enumerate(evidence[:5], start=1):
+        line_start = item.get("line_start")
+        line_end = item.get("line_end")
+        line_label = ""
+        if line_start is not None:
+            line_label = (
+                f" l.{line_start}-{line_end}"
+                if line_end is not None and line_end != line_start
+                else f" l.{line_start}"
+            )
+        citation = item.get("citation_label") or (
+            f"{item.get('document_code', 'DOC')} p.{item.get('page_start', '?')}{line_label}"
+        )
+        content = (item.get("content") or "").strip()
+        if content:
+            blocks.append(f"[{index}] {citation}\n{content[:2400]}")
+    return "\n\n".join(blocks) if blocks else "No approved evidence found."
+
+
+def _parse_supported_flag(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return None
+    if normalized in {"true", "yes", "y", "supported", "fully_supported"}:
+        return True
+    if normalized in {"false", "no", "n", "unsupported", "not_supported"}:
+        return False
+    if "partial" in normalized and "support" in normalized:
+        return True
+    if "support" in normalized and all(
+        token not in normalized for token in ("not", "unsupport", "false", "no")
+    ):
+        return True
+    if any(token in normalized for token in ("unsupport", "not support", "not_supported")):
+        return False
+    return None
+
+
+def rewrite_query_with_dspy(
+    question: str,
+    *,
+    language: str = "en",
+    role: str = "operator",
+    history: list[dict[str, str]] | None = None,
+) -> dict[str, str] | None:
+    if dspy is None or not settings.GROQ_API_KEY:
+        return None
+
+    try:
+        dsp = ensure_dspy()
+        _get_dspy_lm()
+        signatures = build_signatures()
+        rewrite = dsp.ChainOfThought(signatures["rewrite_query"])
+        response = rewrite(
+            question=question,
+            history=_history_to_text(history),
+            language=language,
+            role=role,
+        )
+        rewritten_query = (getattr(response, "rewritten_query", "") or "").strip() or question
+        retrieval_hints = (getattr(response, "retrieval_hints", "") or "").strip()
+        return {
+            "rewritten_query": rewritten_query,
+            "retrieval_hints": retrieval_hints,
+        }
+    except Exception:
+        return None
+
+
+def verify_grounded_answer_with_dspy(
+    question: str,
+    *,
+    draft_answer: str,
+    drafted_citations: str | None = None,
+    evidence: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    if dspy is None or not settings.GROQ_API_KEY or not evidence:
+        return None
+    if not (draft_answer or "").strip():
+        return None
+
+    try:
+        dsp = ensure_dspy()
+        _get_dspy_lm()
+        signatures = build_signatures()
+        verifier = dsp.ChainOfThought(signatures["verify_grounding"])
+        result = verifier(
+            question=question,
+            draft_answer=draft_answer,
+            citations=(drafted_citations or "").strip(),
+            context=_evidence_to_context(evidence),
+        )
+        supported_value = _parse_supported_flag(getattr(result, "supported", None))
+        safety_note = (getattr(result, "safety_note", "") or "").strip()
+        revision_needed = (getattr(result, "revision_needed", "") or "").strip()
+        return {
+            "supported": supported_value,
+            "safety_note": safety_note,
+            "revision_needed": revision_needed,
+        }
+    except Exception:
+        return None
+
+
+def generate_grounded_answer_with_dspy(
+    question: str,
+    *,
+    language: str = "en",
+    role: str = "operator",
+    history: list[dict[str, str]] | None = None,
+    evidence: list[dict[str, Any]] | None = None,
+) -> dict[str, str] | None:
+    if dspy is None or not settings.GROQ_API_KEY or not evidence:
+        return None
+
+    try:
+        dsp = ensure_dspy()
+        _get_dspy_lm()
+        signatures = build_signatures()
+        answer = dsp.ChainOfThought(signatures["grounded_answer"])
+        result = answer(
+            question=question,
+            history=_history_to_text(history),
+            language=language,
+            role=role,
+            context=_evidence_to_context(evidence),
+        )
+        drafted_answer = (getattr(result, "answer", "") or "").strip()
+        drafted_citations = (getattr(result, "citations", "") or "").strip()
+        drafted_confidence = (getattr(result, "confidence", "") or "").strip()
+        if not drafted_answer:
+            return None
+        return {
+            "answer": drafted_answer,
+            "citations": drafted_citations,
+            "confidence": drafted_confidence,
+        }
+    except Exception:
+        return None
