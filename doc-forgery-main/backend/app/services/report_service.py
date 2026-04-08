@@ -199,15 +199,20 @@ class ReportService:
             )
 
         engine_scores = EngineScores(
-            ela_score=self._average(page_scores["ela"]),
-            srm_score=self._average(page_scores["srm"]),
-            noiseprint_score=self._average(page_scores["noiseprint"]),
-            dino_vit_score=self._average(page_scores["dino"]),
+            ela_score=self._aggregate_document_score(page_scores["ela"]),
+            srm_score=self._aggregate_document_score(page_scores["srm"]),
+            noiseprint_score=self._aggregate_document_score(page_scores["noiseprint"]),
+            dino_vit_score=self._aggregate_document_score(page_scores["dino"]),
             ocr_anomaly_score=ocr_result.score,
             phash_score=duplicate_result.phash_score,
-            segmentation_score=self._average(page_scores["segmentation"]),
+            segmentation_score=self._aggregate_document_score(page_scores["segmentation"]),
         )
-        overall_score = forensic_risk_score(self.settings, engine_scores)
+        scoring_settings = self.settings
+        if not self.model_loader.model_loaded and self.settings.enable_segmentation_in_final_score:
+            scoring_settings = self.settings.model_copy(
+                update={"enable_segmentation_in_final_score": False}
+            )
+        overall_score = forensic_risk_score(scoring_settings, engine_scores)
         verdict = verdict_for_score(self.settings, overall_score)
         created_at = datetime.now(UTC)
 
@@ -261,10 +266,16 @@ class ReportService:
             raise HTTPException(status_code=404, detail="Analysis not found.")
         return DeleteAnalysisResponse(analysis_id=analysis_id, deleted=True)
 
-    @staticmethod
-    def _average(values: list[float]) -> float:
+    def _aggregate_document_score(self, values: list[float]) -> float:
         if not values:
             return 0.0
+        aggregation = self.settings.document_score_aggregation
+        if aggregation == "max":
+            return float(max(values))
+        if aggregation == "topk_mean":
+            top_k = max(1, min(self.settings.document_score_top_k_pages, len(values)))
+            top_values = sorted(values, reverse=True)[:top_k]
+            return float(sum(top_values) / len(top_values))
         return float(sum(values) / len(values))
 
     @staticmethod

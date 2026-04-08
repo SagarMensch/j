@@ -59,13 +59,13 @@ def _env_list(name: str, default: list[str]) -> list[str]:
 
 
 class ScoreWeights(BaseModel):
-    ela: float = 0.20
-    srm: float = 0.20
-    noiseprint: float = 0.20
-    dino_vit: float = 0.15
-    ocr_anomaly: float = 0.15
-    phash: float = 0.10
-    segmentation: float = 0.0
+    ela: float = 0.15
+    srm: float = 0.15
+    noiseprint: float = 0.15
+    dino_vit: float = 0.10
+    ocr_anomaly: float = 0.10
+    phash: float = 0.05
+    segmentation: float = 0.30
 
 
 class VerdictThresholds(BaseModel):
@@ -98,11 +98,13 @@ class Settings(BaseModel):
     db_path: Path
     duplicate_near_threshold: int = 8
     duplicate_exact_threshold: int = 0
-    enable_segmentation_in_final_score: bool = False
+    enable_segmentation_in_final_score: bool = True
     score_weights: ScoreWeights = Field(default_factory=ScoreWeights)
     verdict_thresholds: VerdictThresholds = Field(default_factory=VerdictThresholds)
-    dino_model_name: str = "vit_tiny_patch16_224"
+    dino_model_name: str = "vit_small_patch14_dinov2.lvd142m"
     min_region_area_px: int = 64
+    document_score_aggregation: Literal["mean", "max", "topk_mean"] = "topk_mean"
+    document_score_top_k_pages: int = 2
 
     @property
     def backend_root(self) -> Path:
@@ -152,23 +154,25 @@ def build_settings() -> Settings:
         duplicate_near_threshold=_env_int("DUPLICATE_NEAR_THRESHOLD", 8),
         duplicate_exact_threshold=_env_int("DUPLICATE_EXACT_THRESHOLD", 0),
         enable_segmentation_in_final_score=_env_bool(
-            "ENABLE_SEGMENTATION_IN_FINAL_SCORE", False
+            "ENABLE_SEGMENTATION_IN_FINAL_SCORE", True
         ),
         score_weights=ScoreWeights(
-            ela=_env_float("WEIGHT_ELA", 0.20),
-            srm=_env_float("WEIGHT_SRM", 0.20),
-            noiseprint=_env_float("WEIGHT_NOISEPRINT", 0.20),
-            dino_vit=_env_float("WEIGHT_DINO_VIT", 0.15),
-            ocr_anomaly=_env_float("WEIGHT_OCR_ANOMALY", 0.15),
-            phash=_env_float("WEIGHT_PHASH", 0.10),
-            segmentation=_env_float("WEIGHT_SEGMENTATION", 0.0),
+            ela=_env_float("WEIGHT_ELA", 0.15),
+            srm=_env_float("WEIGHT_SRM", 0.15),
+            noiseprint=_env_float("WEIGHT_NOISEPRINT", 0.15),
+            dino_vit=_env_float("WEIGHT_DINO_VIT", 0.10),
+            ocr_anomaly=_env_float("WEIGHT_OCR_ANOMALY", 0.10),
+            phash=_env_float("WEIGHT_PHASH", 0.05),
+            segmentation=_env_float("WEIGHT_SEGMENTATION", 0.30),
         ),
         verdict_thresholds=VerdictThresholds(
             clean_upper=_env_float("THRESHOLD_CLEAN_UPPER", 0.40),
             suspicious_upper=_env_float("THRESHOLD_SUSPICIOUS_UPPER", 0.85),
         ),
-        dino_model_name=_env_str("DINO_MODEL_NAME", "vit_tiny_patch16_224"),
+        dino_model_name=_env_str("DINO_MODEL_NAME", "vit_small_patch14_dinov2.lvd142m"),
         min_region_area_px=_env_int("MIN_REGION_AREA_PX", 64),
+        document_score_aggregation=_env_str("DOCUMENT_SCORE_AGGREGATION", "topk_mean"),
+        document_score_top_k_pages=_env_int("DOCUMENT_SCORE_TOP_K_PAGES", 2),
     )
 
 

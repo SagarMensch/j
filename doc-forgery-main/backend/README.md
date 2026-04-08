@@ -12,21 +12,26 @@ FastAPI backend for document forgery analysis with:
 
 ## Important checkpoint note
 
-The markdown spec says to try a 12-channel `efficientnet-b4` UNet first. The supplied checkpoint does not match that contract.
+The current L4 training path and backend inference path now target the same 13-channel contract and can load wrapped `UnetPlusPlus` checkpoints.
 
-- The checkpoint's first stem convolution expects `13` input channels.
-- The bundled Kaggle training script builds `smp.Unet(encoder_name="efficientnet-b3", in_channels=13, classes=1)`.
-- The loader still tries the requested `b4:12` and `b3:12` variants first, then falls back to checkpoint-derived candidates (`b3:13`, `b4:13`, `b2:13`) so the shipped `.pth` can actually load.
+- The backend loader tries wrapped and plain variants of `UnetPlusPlus` and `Unet`.
+- Encoder candidates include `mit_b5`, `mit_b4`, and EfficientNet fallbacks.
+- Checkpoint metadata such as `config.ENCODER` and `config.N_CH` is used when present.
 
 The segmentation tensor implemented here follows the real checkpoint contract:
 
 - channels `0-2`: RGB
-- channels `3-5`: ELA
+- channels `3-5`: multi-quality ELA
 - channels `6-8`: Laplacian residuals
 - channel `9`: OCR proxy map
-- channel `10`: SRM map
-- channel `11`: Noiseprint approximation
-- channel `12`: DINO-style anomaly map
+- channel `10`: DCT residual
+- channel `11`: fused `max(SRM, DINO)` anomaly map
+- channel `12`: Noiseprint approximation
+
+Document-level score aggregation also uses suspicious-page emphasis by default:
+
+- `DOCUMENT_SCORE_AGGREGATION=topk_mean`
+- `DOCUMENT_SCORE_TOP_K_PAGES=2`
 
 ## Project layout
 

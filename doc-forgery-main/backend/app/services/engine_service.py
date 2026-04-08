@@ -49,21 +49,35 @@ class EngineService:
     def _load_dino_model(self) -> torch.nn.Module | None:
         if timm is None:
             return None
-        try:
-            model = timm.create_model(
-                self.settings.dino_model_name,
-                pretrained=True,
-                num_classes=0,
-            )
-            model.eval()
-            model.to(self.device)
-            for parameter in model.parameters():
-                parameter.requires_grad_(False)
-            self.logger.info("DINO backend initialised", extra={"model_name": self.settings.dino_model_name})
-            return model
-        except Exception as exc:
-            self.logger.warning("Falling back from timm DINO backend: %s", exc)
-            return None
+        candidate_names: list[str] = []
+        for model_name in (
+            self.settings.dino_model_name,
+            "vit_small_patch16_224",
+            "vit_tiny_patch16_224",
+        ):
+            if model_name not in candidate_names:
+                candidate_names.append(model_name)
+
+        last_error: Exception | None = None
+        for model_name in candidate_names:
+            try:
+                model = timm.create_model(
+                    model_name,
+                    pretrained=True,
+                    num_classes=0,
+                )
+                model.eval()
+                model.to(self.device)
+                for parameter in model.parameters():
+                    parameter.requires_grad_(False)
+                self.logger.info("DINO backend initialised", extra={"model_name": model_name})
+                return model
+            except Exception as exc:
+                last_error = exc
+                self.logger.warning("DINO model load failed for %s: %s", model_name, exc)
+        if last_error is not None:
+            self.logger.warning("Falling back from timm DINO backend: %s", last_error)
+        return None
 
     def _build_srm_kernel_bank(self) -> np.ndarray:
         base_kernels = [
