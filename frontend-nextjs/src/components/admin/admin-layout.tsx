@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Logo } from "@/components/ui/logo";
 import { AppLanguage, useAuth } from "@/lib/auth-context";
+import { apiClient } from "@/lib/api";
 import {
   AnalyticsBarsIcon,
   DashboardBlocksIcon,
@@ -14,6 +15,19 @@ import {
   SettingsMatrixIcon,
   UsersClusterIcon,
 } from "@/components/ui/icons";
+
+type BackendNotification = {
+  id: string;
+  event_type: string;
+  severity: string;
+  title: string;
+  message: string;
+  cta_url?: string | null;
+  status: string;
+  is_read: boolean;
+  created_at?: string | null;
+  read_at?: string | null;
+};
 
 interface NavItem {
   key: "dashboard" | "analytics" | "graph" | "users" | "documents" | "settings";
@@ -93,13 +107,74 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { user, logout, language, setLanguage } = useAuth();
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [notifications, setNotifications] = useState<BackendNotification[]>([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+
+  const unreadCount = notifications.filter((item) => !item.is_read).length;
 
   useEffect(() => {
     if (user === null) return;
     if (user.role !== "admin") {
-      router.push("/operator");
+      router.push("/operator/dashboard");
     }
   }, [router, user]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setNotifications([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadNotifications = async () => {
+      setNotificationsLoading(true);
+      try {
+        const payload = (await apiClient.get(
+          `/api/notifications?user_id=${encodeURIComponent(user.id)}&limit=20`,
+        )) as { notifications?: BackendNotification[] };
+        if (!cancelled) {
+          setNotifications(payload.notifications || []);
+        }
+      } catch {
+        if (!cancelled) {
+          setNotifications([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setNotificationsLoading(false);
+        }
+      }
+    };
+
+    void loadNotifications();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  const markAllNotificationsRead = async () => {
+    if (!user?.id) return;
+    if (!notifications.some((item) => !item.is_read)) return;
+
+    const nowIso = new Date().toISOString();
+    setNotifications((prev) =>
+      prev.map((item) =>
+        item.is_read
+          ? item
+          : { ...item, is_read: true, status: "read", read_at: nowIso },
+      ),
+    );
+
+    try {
+      await apiClient.post("/api/notifications/read-all", {
+        user_id: user.id,
+      });
+    } catch {
+      // Keep UI stable if marking read fails.
+    }
+  };
 
   if (!user) {
     return (
@@ -158,12 +233,94 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
                 <span className="h-2.5 w-2.5 rounded-full bg-accent" />
                 {COPY[language].monitoring}
               </div>
-              <button className="inline-flex h-10 w-10 items-center justify-center rounded-[10px] border border-border bg-white text-muted transition-colors hover:border-primary/20 hover:text-primary">
-                <NotificationGridIcon className="h-4 w-4" />
-              </button>
-              <button className="inline-flex h-10 w-10 items-center justify-center rounded-[10px] border border-border bg-white text-muted transition-colors hover:border-primary/20 hover:text-primary">
+              <div className="relative">
+                <button
+                  onClick={() => {
+                    setShowNotifications((value) => {
+                      const nextValue = !value;
+                      if (nextValue) {
+                        void markAllNotificationsRead();
+                      }
+                      return nextValue;
+                    });
+                  }}
+                  className="relative inline-flex h-10 w-10 items-center justify-center rounded-[10px] border border-border bg-white text-muted transition-colors hover:border-primary/20 hover:text-primary"
+                >
+                  <NotificationGridIcon className="h-4 w-4" />
+                  {unreadCount > 0 ? (
+                    <span className="absolute -right-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-semibold text-white">
+                      {unreadCount}
+                    </span>
+                  ) : null}
+                </button>
+
+                {showNotifications ? (
+                  <div className="absolute right-0 top-full z-20 mt-2 w-96 rounded-[14px] border border-border bg-white shadow-[0px_18px_44px_rgba(0,25,168,0.12)]">
+                    <div className="border-b border-border px-4 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">
+                          Safety and system alerts
+                        </p>
+                        {unreadCount > 0 ? (
+                          <span className="rounded-full bg-danger-light px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-danger">
+                            {unreadCount} new
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="max-h-96 overflow-y-auto">
+                      {notificationsLoading ? (
+                        <div className="px-4 py-5 text-sm text-muted">
+                          Loading alerts...
+                        </div>
+                      ) : notifications.length === 0 ? (
+                        <div className="px-4 py-5 text-sm text-muted">
+                          No alerts yet.
+                        </div>
+                      ) : (
+                        notifications.map((item) => (
+                          <button
+                            key={item.id}
+                            onClick={() => {
+                              setShowNotifications(false);
+                              if (item.cta_url) {
+                                router.push(item.cta_url);
+                              }
+                            }}
+                            className="block w-full border-b border-border px-4 py-3 text-left transition-colors hover:bg-muted-light last:border-b-0"
+                          >
+                            <div className="flex items-start gap-3">
+                              <div
+                                className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${
+                                  item.severity === "high"
+                                    ? "bg-danger"
+                                    : item.severity === "medium"
+                                      ? "bg-warning"
+                                      : "bg-accent"
+                                }`}
+                              />
+                              <div className="min-w-0">
+                                <p className="text-sm font-semibold text-foreground">
+                                  {item.title}
+                                </p>
+                                <p className="mt-1 text-xs text-muted">
+                                  {item.message}
+                                </p>
+                              </div>
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              <Link
+                href="/admin/settings"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-[10px] border border-border bg-white text-muted transition-colors hover:border-primary/20 hover:text-primary"
+              >
                 <SettingsMatrixIcon className="h-4 w-4" />
-              </button>
+              </Link>
               <button
                 onClick={() => {
                   logout();

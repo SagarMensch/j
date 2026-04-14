@@ -9,6 +9,7 @@ import { apiClient } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import {
   AssessmentShieldIcon,
+  DashboardBlocksIcon,
   DocumentStackIcon,
   LookupNodesIcon,
   NotificationGridIcon,
@@ -16,7 +17,7 @@ import {
   UserBadgeIcon,
 } from "@/components/ui/icons";
 
-type NavKey = "lookup" | "training" | "assessments" | "reports";
+type NavKey = "dashboard" | "lookup" | "training" | "assessments" | "reports";
 
 type NavItem = {
   key: NavKey;
@@ -37,10 +38,22 @@ type BackendNotification = {
   read_at?: string | null;
 };
 
+type LiveOperatorProfile = {
+  id: string;
+  full_name: string;
+  email: string;
+  role: string;
+  department: string | null;
+};
+
 type LayoutCopy = {
   workspaceTag: string;
   signedInTag: string;
   notificationsTag: string;
+  loadingWorkspace: string;
+  loadingNotifications: string;
+  noNotifications: string;
+  profileLabel: string;
   supportLabel: string;
   certLabel: string;
   signOutLabel: string;
@@ -50,6 +63,7 @@ type LayoutCopy = {
 };
 
 const NAV_ITEMS: NavItem[] = [
+  { key: "dashboard", href: "/operator/dashboard", icon: <DashboardBlocksIcon /> },
   { key: "lookup", href: "/operator", icon: <LookupNodesIcon /> },
   { key: "training", href: "/operator/training", icon: <TrainingStepsIcon /> },
   {
@@ -62,15 +76,20 @@ const NAV_ITEMS: NavItem[] = [
 
 const COPY: Record<AppLanguage, LayoutCopy> = {
   ENG: {
-    workspaceTag: "Operator Workspace",
+    workspaceTag: "Operator Desk",
     signedInTag: "Signed In",
     notificationsTag: "Notifications",
-    supportLabel: "Help and Support",
+    loadingWorkspace: "Loading operator workspace...",
+    loadingNotifications: "Loading...",
+    noNotifications: "No notifications.",
+    profileLabel: "Profile",
+    supportLabel: "Help",
     certLabel: "My Certifications",
     signOutLabel: "Sign Out",
-    monitoringLabel: "Shift Monitoring Live",
+    monitoringLabel: "Shift Live",
     footerLabel: "Jubilant Ingrevia",
     nav: {
+      dashboard: "Home",
       lookup: "Command Hub",
       training: "Training",
       assessments: "Assessments",
@@ -78,32 +97,42 @@ const COPY: Record<AppLanguage, LayoutCopy> = {
     },
   },
   HIN: {
-    workspaceTag: "Operator Kendra",
-    signedInTag: "Login",
-    notificationsTag: "Suchna",
-    supportLabel: "Madad",
-    certLabel: "Mere Certificate",
-    signOutLabel: "Sign Out",
-    monitoringLabel: "Shift Tracking Live",
+    workspaceTag: "ऑपरेटर डेस्क",
+    signedInTag: "लॉग इन",
+    notificationsTag: "सूचनाएं",
+    loadingWorkspace: "ऑपरेटर स्क्रीन लोड हो रही है...",
+    loadingNotifications: "लोड हो रहा है...",
+    noNotifications: "कोई सूचना नहीं है।",
+    profileLabel: "प्रोफाइल",
+    supportLabel: "मदद",
+    certLabel: "मेरे सर्टिफिकेट",
+    signOutLabel: "साइन आउट",
+    monitoringLabel: "शिफ्ट चालू",
     footerLabel: "Jubilant Ingrevia",
     nav: {
-      lookup: "SOP Hub",
-      training: "Prashikshan",
-      assessments: "Pariksha",
-      reports: "Report",
+      dashboard: "होम",
+      lookup: "कमान्ड हब",
+      training: "ट्रेनिंग",
+      assessments: "जांच",
+      reports: "रिपोर्ट",
     },
   },
   HING: {
-    workspaceTag: "Operator Workspace",
+    workspaceTag: "Operator Desk",
     signedInTag: "Signed In",
     notificationsTag: "Notifs",
+    loadingWorkspace: "Operator screen load ho rahi hai...",
+    loadingNotifications: "Load ho raha hai...",
+    noNotifications: "Koi notification nahi hai.",
+    profileLabel: "Profile",
     supportLabel: "Madad",
     certLabel: "Mere Certs",
-    signOutLabel: "Sign Out",
-    monitoringLabel: "Shift Live",
+    signOutLabel: "Sign out",
+    monitoringLabel: "Shift live",
     footerLabel: "Jubilant Ingrevia",
     nav: {
-      lookup: "SOP Hub",
+      dashboard: "Home",
+      lookup: "Command Hub",
       training: "Training",
       assessments: "Quiz",
       reports: "Reports",
@@ -112,6 +141,10 @@ const COPY: Record<AppLanguage, LayoutCopy> = {
 };
 
 function currentSection(pathname: string | null, language: AppLanguage) {
+  if (pathname?.startsWith("/operator/dashboard")) {
+    return COPY[language].nav.dashboard;
+  }
+
   if (
     pathname === "/operator" ||
     pathname?.startsWith("/operator/reader") ||
@@ -138,6 +171,7 @@ export function OperatorLayout({ children }: { children: React.ReactNode }) {
   const [isMounted, setIsMounted] = useState(false);
   const [notifications, setNotifications] = useState<BackendNotification[]>([]);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [profile, setProfile] = useState<LiveOperatorProfile | null>(null);
   const copy = COPY[language];
   const unreadCount = notifications.filter((item) => !item.is_read).length;
 
@@ -185,10 +219,43 @@ export function OperatorLayout({ children }: { children: React.ReactNode }) {
     };
   }, [user?.id]);
 
+  useEffect(() => {
+    if (!user?.id) {
+      setProfile(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadProfile = async () => {
+      try {
+        const payload = (await apiClient.get("/api/users")) as {
+          users?: LiveOperatorProfile[];
+        };
+        if (cancelled) return;
+        const matchedProfile =
+          payload.users?.find((item) => item.id === user.id) || null;
+        setProfile(matchedProfile);
+      } catch {
+        if (!cancelled) {
+          setProfile(null);
+        }
+      }
+    };
+
+    void loadProfile();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
   const headerTitle = useMemo(
     () => currentSection(pathname, language),
     [pathname, language],
   );
+  const displayName = profile?.full_name || user?.name || "Operator";
+  const displayEmail = profile?.email || user?.email || "";
+  const displayDepartment = profile?.department || user?.department || "";
 
   const markAllNotificationsRead = async () => {
     if (!user?.id) return;
@@ -219,7 +286,7 @@ export function OperatorLayout({ children }: { children: React.ReactNode }) {
           <div className="tfl-panel w-full max-w-md px-8 py-10 text-center">
             <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
             <p className="text-sm font-medium text-muted">
-              Loading operator workspace...
+              {copy.loadingWorkspace}
             </p>
           </div>
         </div>
@@ -237,7 +304,7 @@ export function OperatorLayout({ children }: { children: React.ReactNode }) {
         <div className="mx-auto max-w-[1580px] px-3 py-3 md:px-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-3.5">
-              <Link href="/operator" className="shrink-0">
+              <Link href="/operator/dashboard" className="shrink-0">
                 <Logo variant="full" size="sm" />
               </Link>
               <div className="hidden h-10 w-px bg-border lg:block" />
@@ -298,11 +365,11 @@ export function OperatorLayout({ children }: { children: React.ReactNode }) {
                     <div className="max-h-80 overflow-y-auto">
                       {notificationsLoading ? (
                         <div className="px-4 py-5 text-sm text-muted">
-                          Loading...
+                          {copy.loadingNotifications}
                         </div>
                       ) : notifications.length === 0 ? (
                         <div className="px-4 py-5 text-sm text-muted">
-                          No notifications.
+                          {copy.noNotifications}
                         </div>
                       ) : (
                         notifications.map((item) => (
@@ -343,35 +410,26 @@ export function OperatorLayout({ children }: { children: React.ReactNode }) {
                     setShowProfileMenu((value) => !value);
                     setShowNotifications(false);
                   }}
-                  className="inline-flex items-center gap-2 rounded-[10px] border border-border bg-white px-2.5 py-1.5 text-left transition-colors hover:border-primary/20"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-[10px] border border-border bg-white text-primary transition-colors hover:border-primary/20 hover:bg-primary/5"
                 >
-                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] bg-[#f3f7fb] text-primary">
-                    <UserBadgeIcon className="h-4 w-4" />
-                  </span>
-                  <div className="hidden sm:block">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
-                      {copy.signedInTag}
-                    </p>
-                    <p className="text-sm font-medium text-foreground">
-                      {user.name}
-                    </p>
-                  </div>
+                  <UserBadgeIcon className="h-4 w-4" />
                 </button>
 
                 {showProfileMenu ? (
                   <div className="absolute right-0 top-full z-20 mt-2 w-56 rounded-[14px] border border-border bg-white shadow-[0px_18px_44px_rgba(0,25,168,0.12)]">
                     <div className="border-b border-border px-4 py-3">
                       <p className="text-sm font-semibold text-foreground">
-                        {user.name}
+                        {displayName}
                       </p>
-                      <p className="mt-1 text-xs text-muted">{user.email}</p>
+                      <p className="mt-1 text-xs text-muted">{displayEmail}</p>
+                      <p className="mt-1 text-xs text-muted">{displayDepartment}</p>
                       <Badge variant="info" size="sm" className="mt-3">
-                        {user.role}
+                        {profile?.role || user.role}
                       </Badge>
                     </div>
                     <div className="p-2">
                       <button className="w-full rounded-[10px] px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-muted-light">
-                        Profile
+                        {copy.profileLabel}
                       </button>
                       <button className="w-full rounded-[10px] px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-muted-light">
                         {copy.certLabel}

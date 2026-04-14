@@ -36,12 +36,142 @@ def _truncate(text: str, limit: int) -> str:
     return text[: limit - 3].rstrip() + "..."
 
 
+METADATA_PATTERNS = [
+    r"\bEffective\s+Date\s*[:#]?\s*[\d/\-.]+",
+    r"\bProcedure\s*#?\s*[:#]?\s*[A-Z0-9.\-_/]+",
+    r"\bIssue\s*[:#]?\s*\d+\b",
+    r"\bRevision\s*[:#]?\s*\d+\b",
+    r"\bPage\s+\d+\s+of\s+\d+\b",
+    r"\bApproved\s+by\s*[:#]?\s*[^.]+",
+    r"\bThis\s+Document\s+is\s+the\s+property\s+of\b[^.]+",
+    r"\bManaging\s+Director\b",
+    r"\bTABLE\s+OF\s+CONTENTS\b",
+]
+
+NOISE_MARKERS = (
+    "effective date",
+    "procedure #",
+    "table of contents",
+    "approved by",
+    "revision",
+    "issue :",
+    "page 1 of",
+    "page 2 of",
+    "property of",
+)
+
+ACTION_MARKERS = (
+    "shall",
+    "must",
+    "ensure",
+    "before",
+    "after",
+    "wear",
+    "check",
+    "use",
+    "keep",
+    "inspect",
+    "confirm",
+    "do not",
+    "never",
+    "always",
+    "only",
+    "required",
+)
+
+
+def _normalize_content(text: str) -> str:
+    value = re.sub(r"[|]+", " ", text or "")
+    value = re.sub(r"\s+", " ", value).strip()
+    return value
+
+
+def _strip_metadata_noise(text: str) -> str:
+    cleaned = _normalize_content(text)
+    for pattern in METADATA_PATTERNS:
+        cleaned = re.sub(pattern, " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(
+        r"\b(?:INTENT|PRINCIPLES|DEFINITION|DEFINITIONS|TABLE OF CONTENTS|RESPONSIBILITIES|PROCEDURE|REFERENCES|RECORDS)\b",
+        " ",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -:;,.")
+    return cleaned
+
+
+def _sentence_score(sentence: str) -> int:
+    lowered = sentence.lower()
+    score = 0
+    score += sum(3 for marker in ACTION_MARKERS if marker in lowered)
+    score -= sum(5 for marker in NOISE_MARKERS if marker in lowered)
+    score += min(len(sentence) // 60, 3)
+    if re.search(r"\b\d+\.\d+\b", sentence):
+        score += 1
+    if re.search(r"[a-z]{3,}", sentence):
+        score += 1
+    if len(re.findall(r"\b(?:I|II|III|IV|V|VI|VII|VIII|IX|X)\.", sentence)) >= 3:
+        score -= 12
+    return score
+
+
+def _extract_operator_sentences(text: str, limit: int = 4) -> list[str]:
+    cleaned = _strip_metadata_noise(text)
+    if not cleaned:
+        return []
+    raw_parts = re.split(r"(?<=[.!?;])\s+|\s+(?=\(\w\)\s)|\s+(?=\d+\.\d+\s)", cleaned)
+    sentences: list[str] = []
+    seen: set[str] = set()
+    for part in raw_parts:
+        sentence = re.sub(r"\s+", " ", part).strip(" -:;,")
+        if len(sentence) < 35:
+            continue
+        key = sentence.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        sentences.append(sentence)
+    ranked = sorted(sentences, key=_sentence_score, reverse=True)
+    return ranked[:limit]
+
+
+def _prepare_step_instruction(text: str) -> str:
+    sentences = _extract_operator_sentences(text, limit=4)
+    if sentences:
+        return _truncate(" ".join(sentences), 900)
+    return _truncate(_strip_metadata_noise(text), 900)
+
+
+def _chunk_quality_score(chunk: dict[str, Any]) -> int:
+    content = _normalize_content(chunk.get("content", ""))
+    if len(content) < 80:
+        return -999
+    score = 0
+    lowered = content.lower()
+    score += sum(3 for marker in ACTION_MARKERS if marker in lowered)
+    score -= sum(6 for marker in NOISE_MARKERS if marker in lowered)
+    score += min(len(_extract_operator_sentences(content, limit=4)), 4) * 4
+    if chunk.get("section_title"):
+        score += 2
+    if (chunk.get("page_start") or 0) >= 3:
+        score += 2
+    else:
+        score -= 8
+    if re.match(r"^page\s+\d+\s+of\s+\d+", lowered):
+        score -= 10
+    if len(re.findall(r"\b(?:I|II|III|IV|V|VI|VII|VIII|IX|X)\.", content)) >= 4:
+        score -= 14
+    if "sop" in lowered and "page" in lowered and "revision" in lowered:
+        score -= 10
+    return score
+
+
 def _make_step_title(chunk: dict[str, Any], step_number: int) -> str:
     section_title = (chunk.get("section_title") or "").strip()
     if section_title:
         return _truncate(section_title, 90)
 
-    sentences = _split_sentences(chunk.get("content", ""))
+    sentences = _extract_operator_sentences(chunk.get("content", ""), limit=2)
     if sentences:
         first = re.sub(r"^[\d.\- )(:]+", "", sentences[0]).strip()
         if first:
@@ -54,10 +184,16 @@ def _make_step_title(chunk: dict[str, Any], step_number: int) -> str:
 
 
 def _step_summary(content: str) -> str:
-    sentences = _split_sentences(content)
+    sentences = _extract_operator_sentences(content, limit=2)
     if sentences:
         return _truncate(sentences[0], 240)
-    return _truncate(re.sub(r"\s+", " ", content).strip(), 240)
+    return _truncate(_strip_metadata_noise(content), 240)
+
+
+def _voice_prompt_from_content(content: str) -> str:
+    summary = _step_summary(content)
+    summary = re.sub(r"\s+", " ", summary).strip()
+    return _truncate(summary, 220)
 
 
 def _heuristic_distractors(summary: str) -> list[str]:
@@ -219,24 +355,52 @@ def generate_learning_assets(
     document_type: str,
     chunks: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    eligible_chunks = [
-        chunk
-        for chunk in sorted(chunks, key=lambda item: (item.get("page_start") or 0, item.get("chunk_index") or 0))
+    scored_chunks = [
+        (chunk, _chunk_quality_score(chunk))
+        for chunk in chunks
         if len((chunk.get("content") or "").strip()) >= 80
     ]
-    selected_chunks = eligible_chunks[:6] if eligible_chunks else chunks[:3]
+    viable_chunks = [item for item in scored_chunks if item[1] > 0]
+    if viable_chunks:
+        selected_chunks = [
+            chunk
+            for chunk, _score in sorted(
+                viable_chunks,
+                key=lambda item: (
+                    -item[1],
+                    item[0].get("page_start") or 0,
+                    item[0].get("chunk_index") or 0,
+                ),
+            )[:6]
+        ]
+        selected_chunks = sorted(
+            selected_chunks,
+            key=lambda item: (item.get("page_start") or 0, item.get("chunk_index") or 0),
+        )
+    else:
+        selected_chunks = [
+            chunk
+            for chunk, _score in sorted(
+                scored_chunks,
+                key=lambda item: (
+                    -item[1],
+                    item[0].get("page_start") or 0,
+                    item[0].get("chunk_index") or 0,
+                ),
+            )[:3]
+        ]
 
     steps = []
     for index, chunk in enumerate(selected_chunks, start=1):
-        content = re.sub(r"\s+", " ", (chunk.get("content") or "")).strip()
-        if not content:
+        content = _prepare_step_instruction(chunk.get("content") or "")
+        if len(content) < 35:
             continue
         steps.append(
             {
                 "step_number": index,
                 "title": _make_step_title(chunk, index),
-                "instruction": _truncate(content, 1500),
-                "voice_prompt": _truncate(content, 420),
+                "instruction": content,
+                "voice_prompt": _voice_prompt_from_content(content),
                 "operator_check": _step_summary(content),
                 "source_chunk_id": chunk.get("source_chunk_id") or chunk.get("id"),
                 "citation_label": chunk.get("citation_label"),

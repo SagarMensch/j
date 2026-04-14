@@ -65,6 +65,22 @@ MANDATORY_DDL_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_actor_created ON admin_audit_logs(actor_user_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_action_created ON admin_audit_logs(action, created_at DESC)",
     """
+    CREATE TABLE IF NOT EXISTS guardrail_appeals (
+        id uuid primary key default gen_random_uuid(),
+        incident_id uuid not null references admin_audit_logs(id) on delete cascade,
+        user_id uuid not null references users(id) on delete cascade,
+        appeal_text text not null,
+        status text not null default 'pending',
+        reviewed_by_user_id uuid references users(id),
+        resolution_notes text,
+        created_at timestamptz not null default now(),
+        reviewed_at timestamptz
+    )
+    """,
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_guardrail_appeals_incident_user ON guardrail_appeals(incident_id, user_id)",
+    "CREATE INDEX IF NOT EXISTS idx_guardrail_appeals_status_created ON guardrail_appeals(status, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_guardrail_appeals_user_created ON guardrail_appeals(user_id, created_at DESC)",
+    """
     CREATE TABLE IF NOT EXISTS chat_conversations (
         id uuid primary key default gen_random_uuid(),
         user_id uuid not null references users(id) on delete cascade,

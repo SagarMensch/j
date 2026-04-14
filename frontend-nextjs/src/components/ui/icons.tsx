@@ -218,3 +218,139 @@ export function SearchGridIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+export function MicPulseIcon({ className }: IconProps) {
+  return (
+    <svg
+      className={iconClassName(className)}
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        d="M12 4.5C10.3431 4.5 9 5.84315 9 7.5V11.5C9 13.1569 10.3431 14.5 12 14.5C13.6569 14.5 15 13.1569 15 11.5V7.5C15 5.84315 13.6569 4.5 12 4.5Z"
+        fill="currentColor"
+      />
+      <path
+        d="M6.5 11.5C6.5 14.5376 8.96243 17 12 17C15.0376 17 17.5 14.5376 17.5 11.5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M12 17V20"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M9.5 20H14.5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M4 10C4.66667 7.66667 6 6.16667 8 5.5"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        opacity="0.45"
+      />
+      <path
+        d="M20 10C19.3333 7.66667 18 6.16667 16 5.5"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        opacity="0.45"
+      />
+    </svg>
+  );
+}
+
+export function TranslateSparkIcon({ className }: IconProps) {
+  return (
+    <svg
+      className={iconClassName(className)}
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        d="M4.5 6.5H14.5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M9.5 6.5V8.5C9.5 11.5376 7.03757 14 4 14"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M6 9.5C6.3 12.1 7.3 14.2 9.4 16"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M13.5 12.5L18.5 19.5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M18.5 12.5L13.5 19.5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M18.5 4.5L19.2 6.3L21 7L19.2 7.7L18.5 9.5L17.8 7.7L16 7L17.8 6.3L18.5 4.5Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+export function SpeakerWaveIcon({ className }: IconProps) {
+  return (
+    <svg
+      className={iconClassName(className)}
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        d="M5 14H8.2L12.8 18V6L8.2 10H5C4.44772 10 4 10.4477 4 11V13C4 13.5523 4.44772 14 5 14Z"
+        fill="currentColor"
+      />
+      <path
+        d="M16 9.5C17.3333 10.4667 18 11.6333 18 13C18 14.3667 17.3333 15.5333 16 16.5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M18.5 7C20.1667 8.53333 21 10.5333 21 13C21 15.4667 20.1667 17.4667 18.5 19"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        opacity="0.65"
+      />
+    </svg>
+  );
+}
+
+export function StopSquareIcon({ className }: IconProps) {
+  return (
+    <svg
+      className={iconClassName(className)}
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <rect x="5" y="5" width="14" height="14" rx="4" fill="currentColor" />
+    </svg>
+  );
+}

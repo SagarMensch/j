@@ -54,10 +54,55 @@ type UsersPayload = {
   }[];
 };
 
+type GuardrailIncidentsPayload = {
+  incidents: {
+    incident_id: string;
+    actor_user_id: string | null;
+    actor_name: string | null;
+    actor_role: string | null;
+    actor_department?: string | null;
+    category: string;
+    reason: string | null;
+    severity: string;
+    channel: string | null;
+    query_excerpt: string | null;
+    matched_terms: string[];
+    actor_incident_count?: number;
+    actor_incident_sequence?: number;
+    actor_incidents_last_24h?: number;
+    is_first_incident_for_actor?: boolean;
+    is_repeat_actor?: boolean;
+    actor_first_seen_at?: string | null;
+    actor_last_seen_at?: string | null;
+    created_at: string;
+  }[];
+  summary: {
+    total: number;
+    counts_by_category: Record<string, number>;
+    counts_by_severity?: Record<string, number>;
+    unique_actor_count?: number;
+    first_time_actor_count?: number;
+    repeat_actor_count?: number;
+    latest_incident_at?: string | null;
+  };
+};
+
 function formatDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'Unknown';
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return 'Unknown';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Unknown';
+  return date.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
 export default function AdminHome() {
@@ -65,6 +110,7 @@ export default function AdminHome() {
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
   const [retrievalStatus, setRetrievalStatus] = useState<RetrievalStatus | null>(null);
   const [users, setUsers] = useState<UsersPayload['users']>([]);
+  const [incidents, setIncidents] = useState<GuardrailIncidentsPayload | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -78,10 +124,11 @@ export default function AdminHome() {
 
     async function loadSummary() {
       try {
-        const [dashboardResponse, retrievalResponse, usersResponse] = await Promise.all([
+        const [dashboardResponse, retrievalResponse, usersResponse, incidentsResponse] = await Promise.all([
           apiClient.get(`/api/dashboard/summary?user_id=${user.id}`),
           apiClient.get('/api/retrieval/status'),
           apiClient.get('/api/users'),
+          apiClient.get(`/api/admin/guardrail/incidents?user_id=${user.id}&limit=8`),
         ]);
 
         if (!isMounted) return;
@@ -89,6 +136,7 @@ export default function AdminHome() {
         setDashboard(dashboardResponse as DashboardSummary);
         setRetrievalStatus(retrievalResponse as RetrievalStatus);
         setUsers((usersResponse as UsersPayload).users || []);
+        setIncidents(incidentsResponse as GuardrailIncidentsPayload);
         setError('');
       } catch (err) {
         if (!isMounted) return;
@@ -110,6 +158,7 @@ export default function AdminHome() {
     () => users.filter((item) => item.role === 'operator' && Number(item.mandatory_completion_rate || 0) >= 100).length,
     [users],
   );
+  const highSeverityIncidents = Number(incidents?.summary.counts_by_severity?.high || 0);
 
   return (
     <AdminLayout>
@@ -172,6 +221,134 @@ export default function AdminHome() {
               />
             </div>
 
+            <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+              <Card title="Guardrail Command Center">
+                <div className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-4">
+                    <div className="rounded-[4px] border border-border bg-muted-light px-4 py-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Recent incidents</p>
+                      <p className="mt-2 text-2xl font-bold text-danger">{incidents?.summary.total || 0}</p>
+                    </div>
+                    <div className="rounded-[4px] border border-border bg-muted-light px-4 py-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">High severity</p>
+                      <p className="mt-2 text-2xl font-bold text-danger">{highSeverityIncidents}</p>
+                    </div>
+                    <div className="rounded-[4px] border border-border bg-muted-light px-4 py-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Unique actors</p>
+                      <p className="mt-2 text-2xl font-bold text-foreground">{incidents?.summary.unique_actor_count || 0}</p>
+                    </div>
+                    <div className="rounded-[4px] border border-border bg-muted-light px-4 py-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">First-time actors</p>
+                      <p className="mt-2 text-2xl font-bold text-secondary">{incidents?.summary.first_time_actor_count || 0}</p>
+                    </div>
+                  </div>
+
+                  {(incidents?.incidents || []).length === 0 ? (
+                    <div className="rounded-[4px] border border-dashed border-border px-4 py-6 text-sm text-muted">
+                      No blocked unsafe or abusive requests have been recorded yet.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {(incidents?.incidents || []).slice(0, 4).map((incident) => (
+                        <div key={incident.incident_id} className="rounded-[4px] border border-border px-4 py-4">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant={incident.severity === 'high' ? 'danger' : 'warning'}>
+                              {incident.severity}
+                            </Badge>
+                            <Badge variant="default">{incident.category}</Badge>
+                            {incident.is_first_incident_for_actor ? (
+                              <Badge variant="success">First time</Badge>
+                            ) : (
+                              <Badge variant="info">
+                                Repeat #{incident.actor_incident_count || 2}
+                              </Badge>
+                            )}
+                            {incident.actor_incidents_last_24h && incident.actor_incidents_last_24h > 1 ? (
+                              <Badge variant="warning">
+                                {incident.actor_incidents_last_24h} in 24h
+                              </Badge>
+                            ) : null}
+                          </div>
+                          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-foreground">
+                                {incident.actor_name || incident.actor_user_id || 'Anonymous user'}
+                              </p>
+                              <p className="mt-1 text-xs text-muted">
+                                {incident.actor_role || 'unknown role'}
+                                {incident.actor_department ? ` | ${incident.actor_department}` : ''}
+                                {incident.channel ? ` | ${incident.channel}` : ''}
+                              </p>
+                              <p className="mt-3 text-sm text-foreground">
+                                {incident.query_excerpt || 'No query excerpt recorded.'}
+                              </p>
+                            </div>
+                            <div className="shrink-0 text-left sm:text-right">
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Last seen</p>
+                              <p className="mt-1 text-xs text-foreground">
+                                {formatDateTime(incident.created_at)}
+                              </p>
+                              <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Reason</p>
+                              <p className="mt-1 text-xs text-foreground">
+                                {(incident.reason || 'policy').replaceAll('_', ' ')}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex justify-end">
+                    <Link href="/admin/analytics?focus=guardrails" className="tfl-tab tfl-tab-active">
+                      <span>Open full guardrail analytics</span>
+                    </Link>
+                  </div>
+                </div>
+              </Card>
+
+              <Card title="Quick Navigation">
+                <div className="space-y-3">
+                  <Link href="/admin/analytics" className="block">
+                    <div className="flex items-start gap-3 rounded-[4px] border border-border px-4 py-4 transition-colors hover:border-secondary hover:bg-secondary/5">
+                      <AnalyticsBarsIcon className="mt-0.5 text-secondary" />
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">Analytics Workspace</p>
+                        <p className="mt-1 text-xs text-muted">Deep readiness, reporting, and guardrail breakdowns.</p>
+                      </div>
+                    </div>
+                  </Link>
+                  <Link href="/admin/graph" className="block">
+                    <div className="flex items-start gap-3 rounded-[4px] border border-border px-4 py-4 transition-colors hover:border-secondary hover:bg-secondary/5">
+                      <LookupNodesIcon className="mt-0.5 text-primary" />
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">Knowledge Graph</p>
+                        <p className="mt-1 text-xs text-muted">Explore connected SOP entities with live node navigation.</p>
+                      </div>
+                    </div>
+                  </Link>
+                  <Link href="/admin/documents" className="block">
+                    <div className="flex items-start gap-3 rounded-[4px] border border-border px-4 py-4 transition-colors hover:border-secondary hover:bg-secondary/5">
+                      <DocumentStackIcon className="mt-0.5 text-primary" />
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">Document Control</p>
+                        <p className="mt-1 text-xs text-muted">Upload, revise, and validate approved content.</p>
+                      </div>
+                    </div>
+                  </Link>
+                  <Link href="/admin/users" className="block">
+                    <div className="flex items-start gap-3 rounded-[4px] border border-border px-4 py-4 transition-colors hover:border-secondary hover:bg-secondary/5">
+                      <UsersClusterIcon className="mt-0.5 text-foreground" />
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">User Directory</p>
+                        <p className="mt-1 text-xs text-muted">Inspect operator completion and certification status.</p>
+                      </div>
+                    </div>
+                  </Link>
+                </div>
+              </Card>
+            </div>
+
             <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
               <Card title="Workforce Readiness">
                 <div className="space-y-4">
@@ -203,47 +380,6 @@ export default function AdminHome() {
                       </div>
                     ))}
                   </div>
-                </div>
-              </Card>
-
-              <Card title="Quick Navigation">
-                <div className="space-y-3">
-                  <Link href="/admin/analytics" className="block">
-                    <div className="flex items-start gap-3 rounded-[4px] border border-border px-4 py-4 transition-colors hover:border-secondary hover:bg-secondary/5">
-                      <AnalyticsBarsIcon className="mt-0.5 text-secondary" />
-                      <div>
-                        <p className="text-sm font-semibold text-foreground">Analytics Workspace</p>
-                        <p className="mt-1 text-xs text-muted">Deep readiness, reporting, and usage breakdowns.</p>
-                      </div>
-                    </div>
-                  </Link>
-                  <Link href="/admin/graph" className="block">
-                    <div className="flex items-start gap-3 rounded-[4px] border border-border px-4 py-4 transition-colors hover:border-secondary hover:bg-secondary/5">
-                      <LookupNodesIcon className="mt-0.5 text-primary" />
-                      <div>
-                        <p className="text-sm font-semibold text-foreground">Knowledge Graph</p>
-                        <p className="mt-1 text-xs text-muted">Explore connected SOP entities with live node navigation.</p>
-                      </div>
-                    </div>
-                  </Link>
-                  <Link href="/admin/documents" className="block">
-                    <div className="flex items-start gap-3 rounded-[4px] border border-border px-4 py-4 transition-colors hover:border-secondary hover:bg-secondary/5">
-                      <DocumentStackIcon className="mt-0.5 text-primary" />
-                      <div>
-                        <p className="text-sm font-semibold text-foreground">Document Control</p>
-                        <p className="mt-1 text-xs text-muted">Upload, revise, and validate approved content.</p>
-                      </div>
-                    </div>
-                  </Link>
-                  <Link href="/admin/users" className="block">
-                    <div className="flex items-start gap-3 rounded-[4px] border border-border px-4 py-4 transition-colors hover:border-secondary hover:bg-secondary/5">
-                      <UsersClusterIcon className="mt-0.5 text-foreground" />
-                      <div>
-                        <p className="text-sm font-semibold text-foreground">User Directory</p>
-                        <p className="mt-1 text-xs text-muted">Inspect operator completion and certification status.</p>
-                      </div>
-                    </div>
-                  </Link>
                 </div>
               </Card>
             </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AdminLayout } from "@/components/admin/admin-layout";
 import { Card } from "@/components/ui/card";
 import { DonutChart, LineChart, BarChart } from "@/components/ui/charts";
@@ -70,17 +70,54 @@ type GuardrailIncidentsPayload = {
     actor_user_id: string | null;
     actor_name: string | null;
     actor_role: string | null;
+    actor_department?: string | null;
     category: string;
     reason: string | null;
     severity: string;
     channel: string | null;
     query_excerpt: string | null;
     matched_terms: string[];
+    actor_incident_count?: number;
+    actor_incident_sequence?: number;
+    actor_incidents_last_24h?: number;
+    is_first_incident_for_actor?: boolean;
+    is_repeat_actor?: boolean;
+    actor_first_seen_at?: string | null;
+    actor_last_seen_at?: string | null;
     created_at: string;
   }[];
   summary: {
     total: number;
     counts_by_category: Record<string, number>;
+    counts_by_severity?: Record<string, number>;
+    unique_actor_count?: number;
+    first_time_actor_count?: number;
+    repeat_actor_count?: number;
+    latest_incident_at?: string | null;
+  };
+};
+
+type GuardrailAppealsPayload = {
+  appeals: {
+    appeal_id: string;
+    incident_id: string;
+    requester_user_id: string | null;
+    requester_name: string | null;
+    requester_role: string | null;
+    appeal_text: string | null;
+    status: string;
+    resolution_notes: string | null;
+    reviewed_by_name: string | null;
+    created_at: string | null;
+    reviewed_at: string | null;
+    incident_category: string | null;
+    incident_reason: string | null;
+    incident_severity: string;
+    query_excerpt: string | null;
+  }[];
+  summary: {
+    total: number;
+    counts_by_status: Record<string, number>;
   };
 };
 
@@ -109,6 +146,7 @@ function deriveOperatorStatus(
 
 export default function AdminAnalytics() {
   const { user } = useAuth();
+  const guardrailCardRef = useRef<HTMLDivElement | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [readiness, setReadiness] = useState<ReadinessPayload | null>(null);
@@ -116,8 +154,11 @@ export default function AdminAnalytics() {
   const [incidents, setIncidents] = useState<GuardrailIncidentsPayload | null>(
     null,
   );
+  const [appeals, setAppeals] = useState<GuardrailAppealsPayload | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
+  const [reviewingAppealId, setReviewingAppealId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user?.id) {
@@ -133,18 +174,25 @@ export default function AdminAnalytics() {
           scope: "live",
           role: user.role,
         });
-        const [readinessResponse, reportingResponse, incidentsResponse] =
+        const [
+          readinessResponse,
+          reportingResponse,
+          incidentsResponse,
+          appealsResponse,
+        ] =
           await Promise.all([
-          apiClient.get(`/api/admin/readiness/overview?user_id=${user.id}`),
-          apiClient.get(`/api/admin/reporting/overview?user_id=${user.id}`),
-          apiClient.get(`/api/admin/guardrail/incidents?user_id=${user.id}`),
-        ]);
+            apiClient.get(`/api/admin/readiness/overview?user_id=${user.id}`),
+            apiClient.get(`/api/admin/reporting/overview?user_id=${user.id}`),
+            apiClient.get(`/api/admin/guardrail/incidents?user_id=${user.id}`),
+            apiClient.get(`/api/admin/guardrail/appeals?user_id=${user.id}`),
+          ]);
 
         if (!isMounted) return;
 
         setReadiness(readinessResponse as ReadinessPayload);
         setReporting(reportingResponse as ReportingPayload);
         setIncidents(incidentsResponse as GuardrailIncidentsPayload);
+        setAppeals(appealsResponse as GuardrailAppealsPayload);
         setError("");
       } catch (err) {
         if (!isMounted) return;
@@ -165,6 +213,46 @@ export default function AdminAnalytics() {
       isMounted = false;
     };
   }, [user?.id, user?.role]);
+
+  const handleAppealReview = async (
+    appealId: string,
+    status: "approved" | "rejected",
+  ) => {
+    if (!user?.id) return;
+    setReviewingAppealId(appealId);
+    try {
+      await apiClient.post(`/api/admin/guardrail/appeals/${appealId}/review`, {
+        user_id: user.id,
+        status,
+        resolution_notes: (reviewNotes[appealId] || "").trim() || undefined,
+      });
+      const appealsResponse = (await apiClient.get(
+        `/api/admin/guardrail/appeals?user_id=${user.id}`,
+      )) as GuardrailAppealsPayload;
+      setAppeals(appealsResponse);
+      setReviewNotes((prev) => ({ ...prev, [appealId]: "" }));
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to review guardrail appeal.",
+      );
+    } finally {
+      setReviewingAppealId(null);
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("focus") !== "guardrails") return;
+    const target = guardrailCardRef.current;
+    if (!target) return;
+    const timeout = window.setTimeout(() => {
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 180);
+    return () => window.clearTimeout(timeout);
+  }, [incidents]);
 
   const filteredOperators = useMemo(() => {
     if (!readiness) return [];
@@ -350,15 +438,32 @@ export default function AdminAnalytics() {
               </div>
             </Card>
 
+            <div ref={guardrailCardRef}>
             <Card title="Guardrail Incidents" className="!p-0">
               <div className="border-b border-border bg-muted-light px-4 py-3">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm font-semibold text-foreground">
-                    Blocked risky or abusive requests
-                  </p>
-                  <Badge variant="danger">
-                    {incidents?.summary.total || 0} recent
-                  </Badge>
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">
+                      Blocked risky or abusive requests
+                    </p>
+                    <p className="mt-1 text-xs text-muted">
+                      First-time actors, repeat behavior, and severity are tracked per incident.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="danger">
+                      {incidents?.summary.total || 0} recent
+                    </Badge>
+                    <Badge variant="warning">
+                      {incidents?.summary.counts_by_severity?.high || 0} high
+                    </Badge>
+                    <Badge variant="info">
+                      {incidents?.summary.unique_actor_count || 0} actors
+                    </Badge>
+                    <Badge variant="success">
+                      {incidents?.summary.first_time_actor_count || 0} first-time
+                    </Badge>
+                  </div>
                 </div>
               </div>
               <div className="divide-y divide-border">
@@ -384,6 +489,18 @@ export default function AdminAnalytics() {
                             {incident.severity}
                           </Badge>
                           <Badge variant="default">{incident.category}</Badge>
+                          {incident.is_first_incident_for_actor ? (
+                            <Badge variant="success">First time</Badge>
+                          ) : incident.actor_incident_count ? (
+                            <Badge variant="warning">
+                              Repeat #{incident.actor_incident_count}
+                            </Badge>
+                          ) : null}
+                          {incident.actor_incidents_last_24h && incident.actor_incidents_last_24h > 1 ? (
+                            <Badge variant="info">
+                              {incident.actor_incidents_last_24h} in 24h
+                            </Badge>
+                          ) : null}
                           <span className="text-xs text-muted">
                             {incident.channel || "unknown channel"}
                           </span>
@@ -394,6 +511,7 @@ export default function AdminAnalytics() {
                         <p className="mt-1 text-xs text-muted">
                           Actor: {incident.actor_name || incident.actor_user_id || "anonymous"}{" "}
                           {incident.actor_role ? `| ${incident.actor_role}` : ""}{" "}
+                          {incident.actor_department ? `| ${incident.actor_department}` : ""}{" "}
                           | {formatDate(incident.created_at)}
                         </p>
                       </div>
@@ -404,9 +522,134 @@ export default function AdminAnalytics() {
                         <p className="mt-1 text-xs text-foreground">
                           {incident.reason || "policy"}
                         </p>
+                        {incident.actor_first_seen_at ? (
+                          <>
+                            <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
+                              First seen
+                            </p>
+                            <p className="mt-1 text-xs text-foreground">
+                              {formatDate(incident.actor_first_seen_at)}
+                            </p>
+                          </>
+                        ) : null}
                       </div>
                     </div>
                   ))
+                )}
+              </div>
+            </Card>
+            </div>
+
+            <Card title="Guardrail Appeals" className="!p-0">
+              <div className="border-b border-border bg-muted-light px-4 py-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="warning">
+                    {appeals?.summary.counts_by_status?.pending || 0} pending
+                  </Badge>
+                  <Badge variant="success">
+                    {appeals?.summary.counts_by_status?.approved || 0} approved
+                  </Badge>
+                  <Badge variant="default">
+                    {appeals?.summary.counts_by_status?.rejected || 0} rejected
+                  </Badge>
+                </div>
+              </div>
+              <div className="divide-y divide-border">
+                {(appeals?.appeals || []).length === 0 ? (
+                  <div className="p-4 text-sm text-muted">
+                    No guardrail appeals submitted yet.
+                  </div>
+                ) : (
+                  (appeals?.appeals || []).slice(0, 10).map((appeal) => {
+                    const isPending = appeal.status === "pending";
+                    return (
+                      <div key={appeal.appeal_id} className="px-4 py-4">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge
+                            variant={
+                              appeal.incident_severity === "high"
+                                ? "danger"
+                                : "warning"
+                            }
+                          >
+                            {appeal.incident_severity}
+                          </Badge>
+                          <Badge
+                            variant={
+                              appeal.status === "pending"
+                                ? "warning"
+                                : appeal.status === "approved"
+                                  ? "success"
+                                  : "default"
+                            }
+                          >
+                            {appeal.status}
+                          </Badge>
+                          <Badge variant="default">
+                            {appeal.incident_category || "guardrail"}
+                          </Badge>
+                          <span className="text-xs text-muted">
+                            {formatDate(appeal.created_at)}
+                          </span>
+                        </div>
+                        <p className="mt-3 text-sm font-medium text-foreground">
+                          {appeal.requester_name || "Unknown operator"}
+                          {appeal.requester_role ? ` | ${appeal.requester_role}` : ""}
+                        </p>
+                        <p className="mt-1 text-xs text-muted">
+                          Query: {appeal.query_excerpt || "No excerpt recorded"}
+                        </p>
+                        <p className="mt-3 text-sm text-foreground">
+                          Appeal: {appeal.appeal_text || "No appeal text provided."}
+                        </p>
+                        {appeal.resolution_notes ? (
+                          <p className="mt-2 text-xs text-muted">
+                            Resolution: {appeal.resolution_notes}
+                          </p>
+                        ) : null}
+                        {appeal.reviewed_by_name ? (
+                          <p className="mt-1 text-xs text-muted">
+                            Reviewed by {appeal.reviewed_by_name} on {formatDate(appeal.reviewed_at)}
+                          </p>
+                        ) : null}
+                        {isPending ? (
+                          <div className="mt-4 rounded-[12px] border border-border bg-white p-3">
+                            <textarea
+                              value={reviewNotes[appeal.appeal_id] || ""}
+                              onChange={(event) =>
+                                setReviewNotes((prev) => ({
+                                  ...prev,
+                                  [appeal.appeal_id]: event.target.value,
+                                }))
+                              }
+                              placeholder="Optional review note"
+                              className="min-h-[88px] w-full rounded-[12px] border border-border bg-white px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
+                            />
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <button
+                                onClick={() =>
+                                  void handleAppealReview(appeal.appeal_id, "approved")
+                                }
+                                disabled={reviewingAppealId === appeal.appeal_id}
+                                className="rounded-full bg-[#00782a] px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Approve appeal
+                              </button>
+                              <button
+                                onClick={() =>
+                                  void handleAppealReview(appeal.appeal_id, "rejected")
+                                }
+                                disabled={reviewingAppealId === appeal.appeal_id}
+                                className="rounded-full border border-border bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-foreground transition hover:border-primary/30 hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Reject appeal
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </Card>

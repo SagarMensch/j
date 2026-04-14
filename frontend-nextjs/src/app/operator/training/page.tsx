@@ -8,7 +8,7 @@ import { ProgressBar } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api";
-import { useAuth } from "@/lib/auth-context";
+import { AppLanguage, useAuth } from "@/lib/auth-context";
 import { trackEvent } from "@/lib/telemetry";
 import {
   MissionCard,
@@ -32,20 +32,214 @@ type Assignment = {
   assessment_id: string | null;
 };
 
-const STATUS_BADGES: Record<
-  Assignment["status"],
-  { variant: "default" | "warning" | "success"; label: string }
-> = {
-  assigned: { variant: "default", label: "Assigned" },
-  in_progress: { variant: "warning", label: "In Progress" },
-  completed: { variant: "success", label: "Completed" },
+type TrainingCopy = {
+  workspaceTag: string;
+  title: string;
+  subtitle: string;
+  overallProgress: string;
+  continueRoute: string;
+  learningReadiness: string;
+  learningReadinessSubtitle: string;
+  featuredModule: string;
+  noActiveModule: string;
+  noActiveModuleHint: string;
+  dueLabel: (date: string, steps: number) => string;
+  reviewModule: string;
+  resumeModule: string;
+  startModule: string;
+  openQuiz: string;
+  currentLearningLane: string;
+  assigned: string;
+  active: string;
+  complete: string;
+  trainingSignals: string;
+  newQueue: string;
+  overdue: string;
+  completion: string;
+  total: string;
+  assignedModules: string;
+  loadingAssignments: string;
+  backendHint: string;
+  noModules: string;
+  noModulesHint: string;
+  review: string;
+  continueAction: string;
+  start: string;
+  assessment: string;
+  mandatory: string;
+  highCriticality: string;
+  stepsLabel: (steps: number) => string;
+  duePrefix: string;
+  currentStep: (step: number) => string;
+  mission01: string;
+  mission01Sub: string;
+  mission02: string;
+  mission02Sub: string;
+  mission03: string;
+  mission03Sub: string;
+  noDueDate: string;
 };
 
-function formatDate(value: string | null) {
-  if (!value) return "No due date";
+const COPY: Record<AppLanguage, TrainingCopy> = {
+  ENG: {
+    workspaceTag: "Training",
+    title: "Training and enablement",
+    subtitle: "Assigned modules from the latest approved documents.",
+    overallProgress: "Overall progress",
+    continueRoute: "Continue route",
+    learningReadiness: "Learning readiness",
+    learningReadinessSubtitle: "Live progress across assigned modules",
+    featuredModule: "Featured module",
+    noActiveModule: "No active module",
+    noActiveModuleHint: "Waiting for the next approved module.",
+    dueLabel: (date, steps) => `Due ${date} | ${steps} steps`,
+    reviewModule: "Review module",
+    resumeModule: "Resume module",
+    startModule: "Start module",
+    openQuiz: "Open quiz",
+    currentLearningLane: "Current learning lane",
+    assigned: "Assigned",
+    active: "Active",
+    complete: "Complete",
+    trainingSignals: "Training signals",
+    newQueue: "New queue",
+    overdue: "Overdue",
+    completion: "Completion",
+    total: "Total",
+    assignedModules: "Assigned modules",
+    loadingAssignments: "Loading training assignments...",
+    backendHint: "Check that the backend is running and documents are ready.",
+    noModules: "No training modules assigned yet",
+    noModulesHint: "Publish an approved document from admin to generate a module and quiz.",
+    review: "Review",
+    continueAction: "Continue",
+    start: "Start",
+    assessment: "Assessment",
+    mandatory: "Mandatory",
+    highCriticality: "High priority",
+    stepsLabel: (steps) => `${steps} steps`,
+    duePrefix: "Due",
+    currentStep: (step) => `Current step: ${step}`,
+    mission01: "Mission 01",
+    mission01Sub: "Start all assigned modules",
+    mission02: "Mission 02",
+    mission02Sub: "Push in-progress to completion",
+    mission03: "Mission 03",
+    mission03Sub: "Clear overdue items this shift",
+    noDueDate: "No due date",
+  },
+  HIN: {
+    workspaceTag: "ट्रेनिंग",
+    title: "ट्रेनिंग और तैयारी",
+    subtitle: "नए अनुमोदित दस्तावेजों से बने दिए गए मॉड्यूल।",
+    overallProgress: "कुल प्रगति",
+    continueRoute: "आगे बढ़ें",
+    learningReadiness: "सीखने की स्थिति",
+    learningReadinessSubtitle: "दिए गए मॉड्यूल की लाइव प्रगति",
+    featuredModule: "मुख्य मॉड्यूल",
+    noActiveModule: "कोई चालू मॉड्यूल नहीं",
+    noActiveModuleHint: "अगले अनुमोदित मॉड्यूल का इंतजार है।",
+    dueLabel: (date, steps) => `जमा ${date} | ${steps} स्टेप`,
+    reviewModule: "मॉड्यूल देखें",
+    resumeModule: "जारी रखें",
+    startModule: "शुरू करें",
+    openQuiz: "क्विज खोलें",
+    currentLearningLane: "अभी की प्रगति",
+    assigned: "दिया गया",
+    active: "चालू",
+    complete: "पूरा",
+    trainingSignals: "ट्रेनिंग संकेत",
+    newQueue: "नई कतार",
+    overdue: "लेट",
+    completion: "पूरा",
+    total: "कुल",
+    assignedModules: "दिए गए मॉड्यूल",
+    loadingAssignments: "ट्रेनिंग लोड हो रही है...",
+    backendHint: "देखें कि बैकएंड चालू है और दस्तावेज तैयार हैं।",
+    noModules: "अभी कोई ट्रेनिंग मॉड्यूल नहीं मिला",
+    noModulesHint: "एडमिन से अनुमोदित दस्तावेज पब्लिश होने पर मॉड्यूल और क्विज बनेगा।",
+    review: "देखें",
+    continueAction: "जारी रखें",
+    start: "शुरू करें",
+    assessment: "जांच",
+    mandatory: "जरूरी",
+    highCriticality: "बहुत जरूरी",
+    stepsLabel: (steps) => `${steps} स्टेप`,
+    duePrefix: "जमा",
+    currentStep: (step) => `अभी स्टेप: ${step}`,
+    mission01: "लक्ष्य 01",
+    mission01Sub: "सभी दिए गए मॉड्यूल शुरू करें",
+    mission02: "लक्ष्य 02",
+    mission02Sub: "चालू मॉड्यूल पूरा करें",
+    mission03: "लक्ष्य 03",
+    mission03Sub: "इस शिफ्ट में लेट काम खत्म करें",
+    noDueDate: "कोई तारीख नहीं",
+  },
+  HING: {
+    workspaceTag: "Training",
+    title: "Training aur tayari",
+    subtitle: "Latest approved documents se bane assigned modules.",
+    overallProgress: "Overall progress",
+    continueRoute: "Aage badho",
+    learningReadiness: "Learning status",
+    learningReadinessSubtitle: "Assigned modules ki live progress",
+    featuredModule: "Main module",
+    noActiveModule: "Koi active module nahi",
+    noActiveModuleHint: "Next approved module ka wait hai.",
+    dueLabel: (date, steps) => `Due ${date} | ${steps} steps`,
+    reviewModule: "Module dekho",
+    resumeModule: "Resume karo",
+    startModule: "Start karo",
+    openQuiz: "Quiz kholo",
+    currentLearningLane: "Abhi ki progress",
+    assigned: "Assigned",
+    active: "Active",
+    complete: "Complete",
+    trainingSignals: "Training signals",
+    newQueue: "New queue",
+    overdue: "Late",
+    completion: "Complete",
+    total: "Total",
+    assignedModules: "Assigned modules",
+    loadingAssignments: "Training assignments load ho rahe hain...",
+    backendHint: "Check karo backend chal raha hai aur documents ready hain.",
+    noModules: "Abhi koi training module assign nahi hua",
+    noModulesHint: "Admin approved document publish karega tab module aur quiz banega.",
+    review: "Review",
+    continueAction: "Continue",
+    start: "Start",
+    assessment: "Assessment",
+    mandatory: "Mandatory",
+    highCriticality: "High priority",
+    stepsLabel: (steps) => `${steps} steps`,
+    duePrefix: "Due",
+    currentStep: (step) => `Current step: ${step}`,
+    mission01: "Mission 01",
+    mission01Sub: "Sab assigned modules start karo",
+    mission02: "Mission 02",
+    mission02Sub: "In-progress modules complete karo",
+    mission03: "Mission 03",
+    mission03Sub: "Is shift me late items clear karo",
+    noDueDate: "Due date nahi hai",
+  },
+};
+
+function statusBadges(copy: TrainingCopy): Record<
+  Assignment["status"],
+  { variant: "default" | "warning" | "success"; label: string }
+> {
+  return {
+    assigned: { variant: "default", label: copy.assigned },
+    in_progress: { variant: "warning", label: copy.active },
+    completed: { variant: "success", label: copy.complete },
+  };
+}
+
+function formatDate(value: string | null, language: AppLanguage, copy: TrainingCopy) {
+  if (!value) return copy.noDueDate;
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "No due date";
-  return date.toLocaleDateString(undefined, {
+  if (Number.isNaN(date.getTime())) return copy.noDueDate;
+  return date.toLocaleDateString(language === "ENG" ? "en-IN" : "hi-IN", {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -53,7 +247,8 @@ function formatDate(value: string | null) {
 }
 
 export default function TrainingPage() {
-  const { user } = useAuth();
+  const { user, language } = useAuth();
+  const copy = COPY[language];
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -134,6 +329,7 @@ export default function TrainingPage() {
     assignments.find((item) => item.status === "assigned") ||
     assignments[0] ||
     null;
+  const STATUS_BADGES = statusBadges(copy);
 
   return (
     <OperatorLayout>
@@ -142,19 +338,18 @@ export default function TrainingPage() {
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
-                Training Workspace
+                {copy.workspaceTag}
               </p>
               <h1 className="mt-2 text-2xl font-bold text-foreground">
-                Training and enablement
+                {copy.title}
               </h1>
               <p className="mt-2 text-sm text-muted">
-                Guided modules generated from the latest approved SOP, SMP, and
-                work-instruction revisions.
+                {copy.subtitle}
               </p>
             </div>
             <div className="text-right">
               <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
-                Overall Progress
+                {copy.overallProgress}
               </p>
               <p className="mt-1 text-2xl font-bold text-primary">
                 {stats.overallProgress}%
@@ -164,26 +359,29 @@ export default function TrainingPage() {
         </div>
 
         <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-          <Card title="Continue Route" className="!p-0">
+          <Card title={copy.continueRoute} className="!p-0">
             <div className="space-y-4 p-5">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex items-center gap-4">
-                  <ScoreRing
-                    value={stats.overallProgress}
-                    title="Learning Readiness"
-                    subtitle="Live completion across assigned modules"
-                  />
+                    <ScoreRing
+                      value={stats.overallProgress}
+                      title={copy.learningReadiness}
+                      subtitle={copy.learningReadinessSubtitle}
+                    />
                   <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">
-                      Featured Module
-                    </p>
-                    <p className="mt-1 text-xl font-semibold text-foreground">
-                      {featuredAssignment?.module_title || "No active module"}
-                    </p>
-                    <p className="mt-1 text-sm text-muted">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">
+                        {copy.featuredModule}
+                      </p>
+                      <p className="mt-1 text-xl font-semibold text-foreground">
+                        {featuredAssignment?.module_title || copy.noActiveModule}
+                      </p>
+                      <p className="mt-1 text-sm text-muted">
                       {featuredAssignment
-                        ? `Due ${formatDate(featuredAssignment.due_at)} | ${featuredAssignment.total_steps || 0} steps`
-                        : "Waiting for next approved module release."}
+                        ? copy.dueLabel(
+                            formatDate(featuredAssignment.due_at, language, copy),
+                            featuredAssignment.total_steps || 0,
+                          )
+                        : copy.noActiveModuleHint}
                     </p>
                   </div>
                 </div>
@@ -194,17 +392,17 @@ export default function TrainingPage() {
                     >
                       <Button variant="primary">
                         {featuredAssignment.status === "completed"
-                          ? "Review Module"
+                          ? copy.reviewModule
                           : featuredAssignment.status === "in_progress"
-                            ? "Resume Module"
-                            : "Start Module"}
+                            ? copy.resumeModule
+                            : copy.startModule}
                       </Button>
                     </Link>
                     {featuredAssignment.assessment_id ? (
                       <Link
                         href={`/operator/training/${featuredAssignment.module_id}/assessment`}
                       >
-                        <Button variant="secondary">Open Quiz</Button>
+                        <Button variant="secondary">{copy.openQuiz}</Button>
                       </Link>
                     ) : null}
                   </div>
@@ -217,14 +415,14 @@ export default function TrainingPage() {
                       stats.overallProgress,
                   )}
                   showLabel
-                  label="Current learning lane"
+                  label={copy.currentLearningLane}
                   color="bg-primary"
                   height="h-2.5"
                 />
                 <div className="mt-3 grid gap-2 sm:grid-cols-3">
                   <div className="rounded-[12px] border border-border bg-white px-3 py-3">
                     <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
-                      Assigned
+                      {copy.assigned}
                     </p>
                     <p className="mt-1 text-lg font-bold text-foreground">
                       {stats.assigned}
@@ -232,7 +430,7 @@ export default function TrainingPage() {
                   </div>
                   <div className="rounded-[12px] border border-border bg-white px-3 py-3">
                     <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
-                      Active
+                      {copy.active}
                     </p>
                     <p className="mt-1 text-lg font-bold text-primary">
                       {stats.inProgress}
@@ -240,7 +438,7 @@ export default function TrainingPage() {
                   </div>
                   <div className="rounded-[12px] border border-border bg-white px-3 py-3">
                     <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
-                      Complete
+                      {copy.complete}
                     </p>
                     <p className="mt-1 text-lg font-bold text-accent">
                       {stats.completed}
@@ -258,11 +456,11 @@ export default function TrainingPage() {
               streakDays={gameProfile.streakDays}
               badgeLabel={gameProfile.badgeLabel}
             />
-            <Card title="Training Signals">
+            <Card title={copy.trainingSignals}>
               <div className="grid grid-cols-2 gap-3">
                 <div className="rounded-[14px] border border-border bg-[#f7f9ff] px-3 py-3">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
-                    New Queue
+                    {copy.newQueue}
                   </p>
                   <p className="mt-1 text-2xl font-bold text-foreground">
                     {stats.assigned}
@@ -270,7 +468,7 @@ export default function TrainingPage() {
                 </div>
                 <div className="rounded-[14px] border border-border bg-[#fff8ee] px-3 py-3">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
-                    Overdue
+                    {copy.overdue}
                   </p>
                   <p className="mt-1 text-2xl font-bold text-danger">
                     {stats.overdue}
@@ -278,7 +476,7 @@ export default function TrainingPage() {
                 </div>
                 <div className="rounded-[14px] border border-border bg-[#f8fbfa] px-3 py-3">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
-                    Completion
+                    {copy.completion}
                   </p>
                   <p className="mt-1 text-2xl font-bold text-accent">
                     {stats.overallProgress}%
@@ -286,7 +484,7 @@ export default function TrainingPage() {
                 </div>
                 <div className="rounded-[14px] border border-border bg-white px-3 py-3">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
-                    Total
+                    {copy.total}
                   </p>
                   <p className="mt-1 text-2xl font-bold text-foreground">
                     {stats.total}
@@ -298,29 +496,27 @@ export default function TrainingPage() {
         </div>
 
         <div className="grid gap-4 xl:grid-cols-[1.18fr_0.82fr]">
-          <Card title="Assigned Modules" className="!p-0">
+          <Card title={copy.assignedModules} className="!p-0">
             <div className="space-y-3 p-4">
               {isLoading ? (
                 <div className="py-12 text-center text-muted">
                   <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-                  <p>Loading training assignments...</p>
+                  <p>{copy.loadingAssignments}</p>
                 </div>
               ) : error ? (
                 <div className="py-6 text-center">
                   <p className="text-danger font-medium">{error}</p>
                   <p className="mt-2 text-sm text-muted">
-                    Check that the backend is running and documents have been
-                    ingested.
+                    {copy.backendHint}
                   </p>
                 </div>
               ) : assignments.length === 0 ? (
                 <div className="py-10 text-center">
                   <h2 className="text-lg font-semibold text-foreground">
-                    No training modules assigned yet
+                    {copy.noModules}
                   </h2>
                   <p className="mt-2 text-sm text-muted">
-                    Upload an approved document from the admin console to
-                    generate a module and assessment automatically.
+                    {copy.noModulesHint}
                   </p>
                 </div>
               ) : (
@@ -328,10 +524,10 @@ export default function TrainingPage() {
                   const status = STATUS_BADGES[module.status];
                   const actionLabel =
                     module.status === "completed"
-                      ? "Review"
+                      ? copy.review
                       : module.status === "in_progress"
-                        ? "Continue"
-                        : "Start";
+                        ? copy.continueAction
+                        : copy.start;
                   const railColor =
                     module.status === "completed"
                       ? "bg-accent"
@@ -357,17 +553,17 @@ export default function TrainingPage() {
                               {status.label}
                             </Badge>
                             {module.is_mandatory ? (
-                              <Badge variant="info">Mandatory</Badge>
+                              <Badge variant="info">{copy.mandatory}</Badge>
                             ) : null}
                             {module.criticality === "high" ? (
-                              <Badge variant="warning">High Criticality</Badge>
+                              <Badge variant="warning">{copy.highCriticality}</Badge>
                             ) : null}
                           </div>
                           <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-muted">
-                            <span>{module.total_steps || 0} steps</span>
-                            <span>Due: {formatDate(module.due_at)}</span>
+                            <span>{copy.stepsLabel(module.total_steps || 0)}</span>
+                            <span>{copy.duePrefix}: {formatDate(module.due_at, language, copy)}</span>
                             {module.current_step ? (
-                              <span>Current step: {module.current_step}</span>
+                              <span>{copy.currentStep(module.current_step)}</span>
                             ) : null}
                           </div>
                           <ProgressBar
@@ -403,7 +599,7 @@ export default function TrainingPage() {
                                   }
                                   size="sm"
                                 >
-                                  Assessment
+                                  {copy.assessment}
                                 </Button>
                               </Link>
                             ) : null}
@@ -419,8 +615,8 @@ export default function TrainingPage() {
 
           <div className="space-y-3">
             <MissionCard
-              title="Mission 01"
-              subtitle="Start all assigned modules"
+              title={copy.mission01}
+              subtitle={copy.mission01Sub}
               progress={
                 stats.assigned === 0
                   ? 100
@@ -429,14 +625,14 @@ export default function TrainingPage() {
               tone={stats.assigned > 0 ? "warning" : "primary"}
             />
             <MissionCard
-              title="Mission 02"
-              subtitle="Push in-progress to completion"
+              title={copy.mission02}
+              subtitle={copy.mission02Sub}
               progress={Math.min(100, stats.overallProgress + 20)}
               tone="primary"
             />
             <MissionCard
-              title="Mission 03"
-              subtitle="Zero overdue by end of shift"
+              title={copy.mission03}
+              subtitle={copy.mission03Sub}
               progress={
                 stats.overdue === 0
                   ? 100

@@ -53,7 +53,7 @@ export default function Home() {
 
   const handleRoleSelect = (role: UserRole) => {
     login(role);
-    router.push(role === "operator" ? "/operator" : "/admin");
+    router.push(role === "operator" ? "/operator/dashboard" : "/admin");
   };
 
   return (

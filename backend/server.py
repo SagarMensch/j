@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import mimetypes
 import re
@@ -41,6 +42,11 @@ AUTO_LANGUAGE = "unknown"
 DEFAULT_TTS_LANGUAGE = "en-IN"
 DEFAULT_TTS_SPEAKER = "suhani"
 MAX_TTS_CHARACTERS = 500
+DEFAULT_TRANSLATE_MAX_CHARACTERS = 1800
+DSPY_REWRITE_TIMEOUT_SECONDS = 4.0
+DSPY_ANSWER_TIMEOUT_SECONDS = 8.0
+DSPY_VERIFY_TIMEOUT_SECONDS = 4.0
+GROQ_ANSWER_TIMEOUT_SECONDS = 18.0
 SUPPORTED_TTS_SPEAKERS = {
     "aditya",
     "ritu",
@@ -175,6 +181,32 @@ class QueryResponse(BaseModel):
     diagnostics: dict[str, Any]
 
 
+class TranslateRequest(BaseModel):
+    text: str = Field(min_length=1)
+    source_language: str = DEFAULT_TTS_LANGUAGE
+    target_language: str = "hi-IN"
+
+
+class TranslateResponse(BaseModel):
+    text: str
+    translated_text: str
+    source_language: str
+    target_language: str
+
+
+class SpeechSynthesisRequest(BaseModel):
+    text: str = Field(min_length=1)
+    language: str = DEFAULT_TTS_LANGUAGE
+    speaker: str = DEFAULT_TTS_SPEAKER
+
+
+class SpeechSynthesisResponse(BaseModel):
+    text: str
+    language: str
+    audio_base64: str
+    audio_mime_type: str = "audio/wav"
+
+
 class ChatConversationCreateRequest(BaseModel):
     user_id: str
     language: str = "en"
@@ -235,6 +267,17 @@ class NotificationReadRequest(BaseModel):
     user_id: str
 
 
+class GuardrailAppealCreateRequest(BaseModel):
+    user_id: str
+    appeal_text: str = Field(min_length=10, max_length=2000)
+
+
+class GuardrailAppealReviewRequest(BaseModel):
+    user_id: str
+    status: str
+    resolution_notes: str | None = None
+
+
 app = FastAPI(title="Jubilant Ingrevia Platform API", version="2.0")
 
 app.add_middleware(
@@ -257,6 +300,23 @@ if FRONTEND_DIR.exists():
 @app.on_event("startup")
 async def startup_event():
     ensure_database_compatibility()
+    asyncio.create_task(_warm_retrieval_stack())
+
+
+async def _warm_retrieval_stack():
+    def _warm():
+        try:
+            from app.services.bm25_retriever import get_bm25_retriever
+            from app.services.embedding_service import get_embedding_model
+
+            bm25 = get_bm25_retriever()
+            if bm25.bm25 is None or not bm25.chunks:
+                bm25.load_chunks()
+            get_embedding_model()
+        except Exception as exc:
+            print(f"Retrieval warm-up skipped: {exc}")
+
+    await asyncio.to_thread(_warm)
 
 
 def _iso(value: Any) -> str | None:
@@ -988,6 +1048,132 @@ def _extractive_summary_from_evidence(
     return "\n".join(f"{idx}. {line}" for idx, line in enumerate(collected, start=1))
 
 
+TRAINING_NOISE_MARKERS = (
+    "effective date",
+    "procedure #",
+    "approved by",
+    "table of contents",
+    "issue :",
+    "revision :",
+    "property of",
+    "page 1 of",
+    "page 2 of",
+)
+
+TRAINING_ACTION_MARKERS = (
+    "shall",
+    "must",
+    "ensure",
+    "before",
+    "after",
+    "wear",
+    "check",
+    "use",
+    "keep",
+    "confirm",
+    "do not",
+    "never",
+)
+
+
+def _training_text_quality_score(text: str | None) -> int:
+    normalized = re.sub(r"\s+", " ", (text or "")).strip()
+    if len(normalized) < 40:
+        return -10
+    lowered = normalized.lower()
+    score = 0
+    score += sum(3 for marker in TRAINING_ACTION_MARKERS if marker in lowered)
+    score -= sum(5 for marker in TRAINING_NOISE_MARKERS if marker in lowered)
+    if re.search(r"[.!?;]", normalized):
+        score += 2
+    if len(normalized.split()) > 12:
+        score += 1
+    return score
+
+
+def _training_step_is_low_quality(step: dict[str, Any]) -> bool:
+    instruction = re.sub(r"\s+", " ", (step.get("instruction") or "")).strip()
+    roman_enumerations = len(
+        re.findall(r"\b(?:I|II|III|IV|V|VI|VII|VIII|IX|X)\.", instruction)
+    )
+    if re.match(r"^page\s+\d+\s+of\s+\d+", instruction.lower()) and roman_enumerations >= 3:
+        return True
+    if "table of contents" in instruction.lower():
+        return True
+    instruction_score = _training_text_quality_score(step.get("instruction"))
+    check_score = _training_text_quality_score(step.get("operator_check"))
+    return max(instruction_score, check_score) <= 0
+
+
+def _load_revision_training_chunks(conn, revision_id: str) -> list[dict[str, Any]]:
+    return [
+        dict(row)
+        for row in conn.execute(
+            text(
+                """
+                SELECT
+                    dc.id::text AS id,
+                    dc.id::text AS source_chunk_id,
+                    dc.chunk_index,
+                    dc.chunk_type,
+                    dc.page_start,
+                    dc.page_end,
+                    dc.section_title,
+                    dc.citation_label,
+                    dc.content
+                FROM document_chunks dc
+                WHERE dc.revision_id = CAST(:revision_id AS uuid)
+                ORDER BY dc.page_start ASC NULLS LAST, dc.chunk_index ASC
+                """
+            ),
+            {"revision_id": revision_id},
+        ).mappings()
+    ]
+
+
+def _regenerate_training_preview(
+    conn,
+    module_payload: dict[str, Any],
+    steps: list[dict[str, Any]],
+) -> tuple[dict[str, Any], list[dict[str, Any]]] | None:
+    if not steps:
+        return None
+    low_quality_count = sum(1 for step in steps if _training_step_is_low_quality(step))
+    first_visible_steps = steps[:3]
+    first_visible_low_quality = sum(
+        1 for step in first_visible_steps if _training_step_is_low_quality(step)
+    )
+    if low_quality_count < 2 and first_visible_low_quality < 1:
+        return None
+
+    revision_id = module_payload.get("source_revision_id")
+    if not revision_id:
+        return None
+
+    chunks = _load_revision_training_chunks(conn, revision_id)
+    if not chunks:
+        return None
+
+    regenerated_assets = generate_learning_assets(
+        document_code=module_payload.get("document_code") or "Document",
+        document_title=module_payload.get("document_title") or module_payload.get("title") or "Training Module",
+        document_type=module_payload.get("module_type") or "sop_document",
+        chunks=chunks,
+    )
+    regenerated_steps = regenerated_assets.get("steps") or []
+    if not regenerated_steps:
+        return None
+
+    next_module = dict(module_payload)
+    regenerated_module = regenerated_assets.get("module") or {}
+    if regenerated_module.get("description"):
+        next_module["description"] = regenerated_module["description"]
+    if regenerated_module.get("criticality"):
+        next_module["criticality"] = regenerated_module["criticality"]
+    next_module["total_steps"] = len(regenerated_steps)
+    return next_module, regenerated_steps
+
+
 def _is_contextual_follow_up(query: str) -> bool:
     lowered = (query or "").strip().lower()
     if not lowered:
@@ -1054,6 +1240,63 @@ def _notify_guardrail_violation(
 
     normalized_query = re.sub(r"\s+", " ", (query_text or "")).strip()
     snippet = normalized_query[:240]
+    actor_profile = {
+        "id": user_id,
+        "full_name": None,
+        "role": None,
+        "department": None,
+    }
+    if user_id:
+        try:
+            user = _get_user(conn, user_id)
+            actor_profile = {
+                "id": user.get("id"),
+                "full_name": user.get("full_name"),
+                "role": user.get("role"),
+                "department": user.get("department"),
+            }
+        except HTTPException:
+            actor_profile["id"] = user_id
+
+    count_clause = "actor_user_id = CAST(:actor_user_id AS uuid)"
+    count_params: dict[str, Any] = {"cutoff_24h": datetime.now(timezone.utc) - timedelta(hours=24)}
+    if user_id:
+        count_params["actor_user_id"] = user_id
+    else:
+        count_clause = "actor_user_id IS NULL"
+
+    prior_incident_count = int(
+        conn.execute(
+            text(
+                f"""
+                SELECT count(*)
+                FROM admin_audit_logs
+                WHERE action = 'guardrail_blocked_query'
+                  AND {count_clause}
+                """
+            ),
+            count_params,
+        ).scalar_one()
+        or 0
+    )
+    recent_incident_count_24h = int(
+        conn.execute(
+            text(
+                f"""
+                SELECT count(*)
+                FROM admin_audit_logs
+                WHERE action = 'guardrail_blocked_query'
+                  AND {count_clause}
+                  AND created_at >= :cutoff_24h
+                """
+            ),
+            count_params,
+        ).scalar_one()
+        or 0
+    )
+    incident_count_for_actor = prior_incident_count + 1
+    incident_count_last_24h_for_actor = recent_incident_count_24h + 1
+    is_first_incident_for_actor = prior_incident_count == 0
     details = {
         "channel": channel,
         "category": decision.category,
@@ -1062,9 +1305,16 @@ def _notify_guardrail_violation(
         "matched_terms": list(decision.matched_terms),
         "conversation_id": conversation_id,
         "query_excerpt": snippet,
+        "actor_name": actor_profile.get("full_name"),
+        "actor_role": actor_profile.get("role"),
+        "actor_department": actor_profile.get("department"),
+        "incident_count_for_actor": incident_count_for_actor,
+        "prior_incident_count_for_actor": prior_incident_count,
+        "incident_count_last_24h_for_actor": incident_count_last_24h_for_actor,
+        "is_first_incident_for_actor": is_first_incident_for_actor,
     }
 
-    conn.execute(
+    incident_row = conn.execute(
         text(
             """
             INSERT INTO admin_audit_logs (
@@ -1081,6 +1331,7 @@ def _notify_guardrail_violation(
                 :target_id,
                 CAST(:details AS jsonb)
             )
+            RETURNING id::text AS incident_id, created_at
             """
         ),
         {
@@ -1090,7 +1341,8 @@ def _notify_guardrail_violation(
             "target_id": conversation_id or "ad-hoc",
             "details": json.dumps(details),
         },
-    )
+    ).mappings().one()
+    incident_id = str(incident_row["incident_id"])
 
     targets = [
         row["id"]
@@ -1110,15 +1362,16 @@ def _notify_guardrail_violation(
 
     severity = "high" if decision.severity == "high" else "medium"
     category = (decision.category or "policy").replace("_", " ").title()
-    reporter = user_id or "anonymous"
-    base_key = _det_uuid(
-        "guardrail",
-        reporter,
-        decision.category or "unknown",
-        decision.reason or "unspecified",
-        snippet[:80],
-        datetime.now(timezone.utc).isoformat()[:16],
+    reporter = actor_profile.get("full_name") or user_id or "Anonymous user"
+    severity_label = "High severity" if severity == "high" else "Medium severity"
+    incident_label = (
+        "First incident"
+        if is_first_incident_for_actor
+        else f"Repeat incident #{incident_count_for_actor}"
     )
+    reason_label = (decision.reason or "policy_violation").replace("_", " ")
+    role_label = actor_profile.get("role") or "unknown role"
+    excerpt_label = snippet[:96] + ("..." if len(snippet) > 96 else "")
 
     for target_user_id in targets:
         _queue_notification(
@@ -1126,13 +1379,13 @@ def _notify_guardrail_violation(
             user_id=target_user_id,
             event_type="guardrail_blocked",
             severity=severity,
-            title=f"Guardrail blocked: {category}",
+            title=f"{severity_label}: {reporter}",
             message=(
-                f"Blocked {channel} request from user {reporter}. "
-                f"Reason: {(decision.reason or 'policy_violation').replace('_', ' ')}."
+                f"{incident_label} from {reporter} ({role_label}) via {channel}. "
+                f"Reason: {reason_label}. Excerpt: {excerpt_label}"
             ),
-            cta_url="/admin/analytics",
-            event_key=f"guardrail:{base_key}:{target_user_id}",
+            cta_url=f"/admin/analytics?focus=guardrails&incident_id={incident_id}",
+            event_key=f"guardrail:{incident_id}:{target_user_id}",
         )
 
 
@@ -1364,6 +1617,101 @@ def _get_tts_language(detected_language: str) -> str:
     return DEFAULT_TTS_LANGUAGE
 
 
+def _normalize_translation_language(language_code: str | None, *, fallback: str = DEFAULT_TTS_LANGUAGE) -> str:
+    normalized = (language_code or "").strip()
+    if not normalized:
+        return fallback
+
+    lowered = normalized.lower()
+    if lowered in {"eng", "en", "english", "en-in", "en_us", "en-us"}:
+        return "en-IN"
+    if lowered in {"hin", "hing", "hi", "hindi", "hinglish", "hi-in"}:
+        return "hi-IN"
+    return normalized
+
+
+def _is_hinglish_language(language_code: str | None) -> bool:
+    lowered = (language_code or "").strip().lower()
+    return lowered in {"hing", "hinglish", "roman-hindi", "roman_hindi", "hi-latn", "hi-latin"}
+
+
+def _translate_character_limit() -> int:
+    model_name = (settings.SARVAM_TRANSLATE_MODEL or "").strip().lower()
+    if "mayura" in model_name:
+        return 900
+    return DEFAULT_TRANSLATE_MAX_CHARACTERS
+
+
+def _split_text_for_translation(text: str, *, max_chars: int) -> list[str]:
+    normalized = (text or "").strip()
+    if not normalized:
+        return []
+    if len(normalized) <= max_chars:
+        return [normalized]
+
+    paragraphs = [
+        part.strip()
+        for part in re.split(r"\n{2,}", normalized)
+        if part and part.strip()
+    ]
+    if not paragraphs:
+        paragraphs = [normalized]
+
+    chunks: list[str] = []
+    current = ""
+
+    def flush_current():
+        nonlocal current
+        if current.strip():
+            chunks.append(current.strip())
+        current = ""
+
+    def append_piece(piece: str):
+        nonlocal current
+        candidate = piece.strip()
+        if not candidate:
+            return
+        if not current:
+            current = candidate
+            return
+        separator = "\n\n" if "\n" in candidate else " "
+        merged = f"{current}{separator}{candidate}".strip()
+        if len(merged) <= max_chars:
+            current = merged
+            return
+        flush_current()
+        current = candidate
+
+    for paragraph in paragraphs:
+        candidate = paragraph.strip()
+        if not candidate:
+            continue
+        if len(candidate) <= max_chars:
+            append_piece(candidate)
+            continue
+
+        sentences = [
+            part.strip()
+            for part in re.split(r"(?<=[.!?])\s+", candidate)
+            if part and part.strip()
+        ]
+        if not sentences:
+            sentences = [candidate]
+
+        for sentence in sentences:
+            remaining = sentence.strip()
+            while len(remaining) > max_chars:
+                split_at = remaining[:max_chars].rsplit(" ", 1)[0].strip()
+                if not split_at:
+                    split_at = remaining[:max_chars].strip()
+                append_piece(split_at)
+                remaining = remaining[len(split_at):].strip()
+            append_piece(remaining)
+
+    flush_current()
+    return chunks or [normalized[:max_chars].strip()]
+
+
 def _voice_not_understood_message(language_code: str | None) -> str:
     normalized = (language_code or "").strip().lower()
     if normalized.startswith("hi"):
@@ -1432,23 +1780,121 @@ async def _translate_text(
     if not text.strip() or source_language == target_language:
         return text
 
-    translate_resp = await client.post(
-        SARVAM_TRANSLATE_URL,
-        headers={
-            "api-subscription-key": settings.SARVAM_API_KEY,
-            "Content-Type": "application/json",
-        },
-        json={
-            "input": text,
-            "source_language_code": source_language,
-            "target_language_code": target_language,
-            "model": settings.SARVAM_TRANSLATE_MODEL,
-            "mode": settings.SARVAM_TRANSLATE_MODE,
-        },
-    )
-    translate_resp.raise_for_status()
-    translated_text = (translate_resp.json().get("translated_text") or "").strip()
-    return translated_text or text
+    async def _translate_chunk(chunk_text: str, source_code: str) -> str:
+        translate_resp = await client.post(
+            SARVAM_TRANSLATE_URL,
+            headers={
+                "api-subscription-key": settings.SARVAM_API_KEY,
+                "Content-Type": "application/json",
+            },
+            json={
+                "input": chunk_text,
+                "source_language_code": source_code,
+                "target_language_code": target_language,
+                "model": settings.SARVAM_TRANSLATE_MODEL,
+                "mode": settings.SARVAM_TRANSLATE_MODE,
+            },
+        )
+        translate_resp.raise_for_status()
+        translated_text = (translate_resp.json().get("translated_text") or "").strip()
+        return translated_text or chunk_text
+
+    translated_parts: list[str] = []
+    max_chars = _translate_character_limit()
+    chunks = _split_text_for_translation(text, max_chars=max_chars)
+
+    for chunk in chunks:
+        try:
+            translated_parts.append(await _translate_chunk(chunk, source_language))
+            continue
+        except httpx.HTTPStatusError as exc:
+            should_retry_auto = (
+                exc.response is not None
+                and exc.response.status_code == 400
+                and source_language != "auto"
+            )
+            if should_retry_auto:
+                try:
+                    translated_parts.append(await _translate_chunk(chunk, "auto"))
+                    continue
+                except httpx.HTTPStatusError as retry_exc:
+                    if retry_exc.response is not None and retry_exc.response.status_code == 400:
+                        print("Translate fallback returning original chunk after Sarvam 400.")
+                        translated_parts.append(chunk)
+                        continue
+                    raise
+            if exc.response is not None and exc.response.status_code == 400:
+                print("Translate fallback returning original chunk after Sarvam 400.")
+                translated_parts.append(chunk)
+                continue
+            raise
+
+    if not translated_parts:
+        return text
+    return "\n\n".join(part.strip() for part in translated_parts if part.strip()).strip() or text
+
+
+async def _transliterate_to_hinglish(client: httpx.AsyncClient, text: str) -> str:
+    normalized_text = (text or "").strip()
+    if not normalized_text:
+        return text
+    if not settings.GROQ_API_KEY:
+        return text
+
+    max_chars = max(600, _translate_character_limit())
+    chunks = _split_text_for_translation(normalized_text, max_chars=max_chars)
+    transliterated_parts: list[str] = []
+
+    for chunk in chunks:
+        response = await client.post(
+            GROQ_CHAT_URL,
+            headers={
+                "Authorization": f"Bearer {settings.GROQ_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": settings.GROQ_MODEL,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Convert Hindi text into simple Roman Hindi (Hinglish) for Indian plant workers. "
+                            "Keep the meaning exact. Do not translate into English. "
+                            "Return only the converted text."
+                        ),
+                    },
+                    {"role": "user", "content": chunk},
+                ],
+                "temperature": 0.1,
+                "max_tokens": 900,
+            },
+        )
+        response.raise_for_status()
+        content = (
+            response.json()
+            .get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+            .strip()
+        )
+        if content.startswith("```"):
+            content = re.sub(r"^```[a-zA-Z]*\s*", "", content)
+            content = re.sub(r"\s*```$", "", content).strip()
+        transliterated_parts.append(content or chunk)
+
+    if not transliterated_parts:
+        return text
+    return "\n\n".join(part.strip() for part in transliterated_parts if part.strip()).strip() or text
+
+
+async def _run_blocking_with_timeout(timeout_seconds: float, func, *args, **kwargs):
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(func, *args, **kwargs),
+            timeout=timeout_seconds,
+        )
+    except Exception:
+        return None
 
 
 async def _prepare_voice_query(
@@ -1565,6 +2011,12 @@ async def _generate_grounded_answer(
     if not evidence:
         return safe_fallback
 
+    if normalized_scope == "reader" and is_summary_query:
+        return _extractive_summary_from_evidence(
+            evidence,
+            points=summary_points,
+        )
+
     evidence_limit = 10 if (is_summary_query and normalized_scope == "reader") else 5
     context_blocks = []
     for idx, ev in enumerate(evidence[:evidence_limit], start=1):
@@ -1594,7 +2046,9 @@ async def _generate_grounded_answer(
     dspy_role = "reader_copilot" if normalized_scope == "reader" else "operator"
 
     if not skip_verifier_gate:
-        dspy_response = generate_grounded_answer_with_dspy(
+        dspy_response = await _run_blocking_with_timeout(
+            DSPY_ANSWER_TIMEOUT_SECONDS,
+            generate_grounded_answer_with_dspy,
             query,
             language=language,
             role=dspy_role,
@@ -1647,7 +2101,7 @@ async def _generate_grounded_answer(
         )
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=GROQ_ANSWER_TIMEOUT_SECONDS) as client:
                 resp = await client.post(
                     GROQ_CHAT_URL,
                     headers={
@@ -1677,7 +2131,9 @@ async def _generate_grounded_answer(
                 draft_answer = None
 
     if not skip_verifier_gate:
-        verification = verify_grounded_answer_with_dspy(
+        verification = await _run_blocking_with_timeout(
+            DSPY_VERIFY_TIMEOUT_SECONDS,
+            verify_grounded_answer_with_dspy,
             query,
             draft_answer=draft_answer or "",
             drafted_citations=draft_citations,
@@ -1950,6 +2406,7 @@ async def training_module_details(module_id: str, user_id: str):
         ).mappings().first()
         if not module:
             raise HTTPException(status_code=404, detail="Training module not found")
+        module_payload = dict(module)
 
         steps = [
             dict(row)
@@ -1977,6 +2434,27 @@ async def training_module_details(module_id: str, user_id: str):
             ).mappings()
         ]
 
+        regenerated_preview = _regenerate_training_preview(conn, module_payload, steps)
+        if regenerated_preview:
+            module_payload, regenerated_steps = regenerated_preview
+            normalized_steps: list[dict[str, Any]] = []
+            for step in regenerated_steps:
+                normalized_steps.append(
+                    {
+                        "id": str(step.get("source_chunk_id") or uuid.uuid4()),
+                        "step_number": step.get("step_number"),
+                        "title": step.get("title"),
+                        "instruction": step.get("instruction"),
+                        "voice_prompt": step.get("voice_prompt"),
+                        "operator_check": step.get("operator_check"),
+                        "source_chunk_id": step.get("source_chunk_id"),
+                        "citation_label": step.get("citation_label"),
+                        "page_start": step.get("page_start"),
+                        "page_end": step.get("page_end"),
+                    }
+                )
+            steps = normalized_steps
+
         assessment = conn.execute(
             text(
                 """
@@ -1995,7 +2473,7 @@ async def training_module_details(module_id: str, user_id: str):
         ).mappings().first()
 
     return {
-        "module": dict(module),
+        "module": module_payload,
         "steps": steps,
         "assignment": dict(assignment) if assignment else None,
         "assessment": dict(assessment) if assessment else None,
@@ -2273,12 +2751,16 @@ async def grounded_query(req: QueryRequest):
 
     contextual_query = _build_contextual_query(req.query, history)
     rewritten_query = contextual_query
-    rewrite_result = rewrite_query_with_dspy(
-        contextual_query,
-        language=req.language,
-        role="reader_copilot" if normalized_scope == "reader" else (req.role or "operator"),
-        history=history,
-    )
+    rewrite_result = None
+    if normalized_scope != "reader":
+        rewrite_result = await _run_blocking_with_timeout(
+            DSPY_REWRITE_TIMEOUT_SECONDS,
+            rewrite_query_with_dspy,
+            contextual_query,
+            language=req.language,
+            role=req.role or "operator",
+            history=history,
+        )
     if rewrite_result and rewrite_result.get("rewritten_query"):
         rewritten_query = rewrite_result["rewritten_query"]
 
@@ -3894,19 +4376,38 @@ async def admin_guardrail_incidents(user_id: str, limit: int = 20):
             for row in conn.execute(
                 text(
                     """
+                    WITH incident_rows AS (
+                        SELECT
+                            aal.id::text AS incident_id,
+                            aal.actor_user_id::text AS actor_user_id,
+                            COALESCE(u.full_name, aal.details->>'actor_name') AS actor_name,
+                            COALESCE(u.role, aal.details->>'actor_role') AS actor_role,
+                            aal.target_type,
+                            aal.target_id,
+                            aal.details,
+                            aal.created_at,
+                            COALESCE(aal.actor_user_id::text, 'anonymous') AS actor_key
+                        FROM admin_audit_logs aal
+                        LEFT JOIN users u ON u.id = aal.actor_user_id
+                        WHERE aal.action = 'guardrail_blocked_query'
+                    )
                     SELECT
-                        aal.id::text AS incident_id,
-                        aal.actor_user_id::text AS actor_user_id,
-                        u.full_name AS actor_name,
-                        u.role AS actor_role,
-                        aal.target_type,
-                        aal.target_id,
-                        aal.details,
-                        aal.created_at
-                    FROM admin_audit_logs aal
-                    LEFT JOIN users u ON u.id = aal.actor_user_id
-                    WHERE aal.action = 'guardrail_blocked_query'
-                    ORDER BY aal.created_at DESC
+                        incident_id,
+                        actor_user_id,
+                        actor_name,
+                        actor_role,
+                        target_type,
+                        target_id,
+                        details,
+                        created_at,
+                        count(*) OVER (PARTITION BY actor_key) AS actor_incident_count,
+                        row_number() OVER (PARTITION BY actor_key ORDER BY created_at ASC, incident_id ASC) AS actor_incident_sequence,
+                        min(created_at) OVER (PARTITION BY actor_key) AS actor_first_seen_at,
+                        max(created_at) OVER (PARTITION BY actor_key) AS actor_last_seen_at,
+                        sum(CASE WHEN created_at >= now() - interval '24 hours' THEN 1 ELSE 0 END)
+                            OVER (PARTITION BY actor_key) AS actor_incidents_last_24h
+                    FROM incident_rows
+                    ORDER BY created_at DESC
                     LIMIT :limit
                     """
                 ),
@@ -3916,12 +4417,33 @@ async def admin_guardrail_incidents(user_id: str, limit: int = 20):
 
     incidents = []
     counts_by_category: dict[str, int] = {}
+    counts_by_severity: dict[str, int] = {}
+    unique_actors: set[str] = set()
+    first_time_actors = 0
+    repeat_actors = 0
     for row in rows:
         details = row.get("details") or {}
         if not isinstance(details, dict):
             details = {}
         category = str(details.get("category") or "unknown")
+        severity = str(details.get("severity") or "medium")
+        actor_key = str(row.get("actor_user_id") or row.get("actor_name") or "anonymous")
+        actor_incident_count = int(row.get("actor_incident_count") or details.get("incident_count_for_actor") or 1)
+        actor_incident_sequence = int(row.get("actor_incident_sequence") or actor_incident_count or 1)
+        actor_incidents_last_24h = int(
+            row.get("actor_incidents_last_24h")
+            or details.get("incident_count_last_24h_for_actor")
+            or 0
+        )
+        is_first_incident_for_actor = actor_incident_sequence == 1
+
         counts_by_category[category] = counts_by_category.get(category, 0) + 1
+        counts_by_severity[severity] = counts_by_severity.get(severity, 0) + 1
+        unique_actors.add(actor_key)
+        if is_first_incident_for_actor:
+            first_time_actors += 1
+        if actor_incident_count > 1:
+            repeat_actors += 1
         incidents.append(
             {
                 "incident_id": row["incident_id"],
@@ -3932,11 +4454,19 @@ async def admin_guardrail_incidents(user_id: str, limit: int = 20):
                 "target_id": row.get("target_id"),
                 "category": category,
                 "reason": details.get("reason"),
-                "severity": details.get("severity") or "medium",
+                "severity": severity,
                 "channel": details.get("channel"),
                 "query_excerpt": details.get("query_excerpt"),
                 "matched_terms": details.get("matched_terms") or [],
                 "conversation_id": details.get("conversation_id"),
+                "actor_department": details.get("actor_department"),
+                "actor_incident_count": actor_incident_count,
+                "actor_incident_sequence": actor_incident_sequence,
+                "actor_incidents_last_24h": actor_incidents_last_24h,
+                "is_first_incident_for_actor": is_first_incident_for_actor,
+                "is_repeat_actor": actor_incident_count > 1,
+                "actor_first_seen_at": _iso(row.get("actor_first_seen_at")),
+                "actor_last_seen_at": _iso(row.get("actor_last_seen_at")),
                 "created_at": _iso(row.get("created_at")),
             }
         )
@@ -3946,7 +4476,397 @@ async def admin_guardrail_incidents(user_id: str, limit: int = 20):
         "summary": {
             "total": len(incidents),
             "counts_by_category": counts_by_category,
+            "counts_by_severity": counts_by_severity,
+            "unique_actor_count": len(unique_actors),
+            "first_time_actor_count": first_time_actors,
+            "repeat_actor_count": repeat_actors,
+            "latest_incident_at": incidents[0]["created_at"] if incidents else None,
         },
+    }
+
+
+@app.get("/api/guardrail/incidents")
+async def user_guardrail_incidents(user_id: str, limit: int = 20):
+    safe_limit = max(1, min(int(limit or 20), 100))
+    with engine.connect() as conn:
+        user = _get_user(conn, user_id)
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT
+                        aal.id::text AS incident_id,
+                        aal.details,
+                        aal.created_at,
+                        ga.id::text AS appeal_id,
+                        ga.appeal_text,
+                        ga.status AS appeal_status,
+                        ga.resolution_notes,
+                        ga.created_at AS appeal_created_at,
+                        ga.reviewed_at AS appeal_reviewed_at,
+                        reviewer.full_name AS reviewed_by_name
+                    FROM admin_audit_logs aal
+                    LEFT JOIN guardrail_appeals ga
+                      ON ga.incident_id = aal.id
+                     AND ga.user_id = CAST(:user_id AS uuid)
+                    LEFT JOIN users reviewer
+                      ON reviewer.id = ga.reviewed_by_user_id
+                    WHERE aal.action = 'guardrail_blocked_query'
+                      AND aal.actor_user_id = CAST(:user_id AS uuid)
+                    ORDER BY aal.created_at DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"user_id": user_id, "limit": safe_limit},
+            ).mappings()
+        ]
+
+    incidents = []
+    for row in rows:
+        details = row.get("details") or {}
+        if not isinstance(details, dict):
+            details = {}
+        incidents.append(
+            {
+                "incident_id": row["incident_id"],
+                "category": details.get("category"),
+                "reason": details.get("reason"),
+                "severity": details.get("severity") or "medium",
+                "channel": details.get("channel"),
+                "query_excerpt": details.get("query_excerpt"),
+                "matched_terms": details.get("matched_terms") or [],
+                "conversation_id": details.get("conversation_id"),
+                "created_at": _iso(row.get("created_at")),
+                "appeal": {
+                    "appeal_id": row.get("appeal_id"),
+                    "appeal_text": row.get("appeal_text"),
+                    "status": row.get("appeal_status"),
+                    "resolution_notes": row.get("resolution_notes"),
+                    "created_at": _iso(row.get("appeal_created_at")),
+                    "reviewed_at": _iso(row.get("appeal_reviewed_at")),
+                    "reviewed_by_name": row.get("reviewed_by_name"),
+                }
+                if row.get("appeal_id")
+                else None,
+            }
+        )
+
+    return {
+        "user": user,
+        "incidents": incidents,
+        "summary": {
+            "total": len(incidents),
+            "pending_appeals": sum(
+                1 for item in incidents if (item.get("appeal") or {}).get("status") == "pending"
+            ),
+        },
+    }
+
+
+@app.post("/api/guardrail/incidents/{incident_id}/appeal")
+async def create_guardrail_appeal(incident_id: str, req: GuardrailAppealCreateRequest):
+    appeal_text = re.sub(r"\s+", " ", (req.appeal_text or "")).strip()
+    if len(appeal_text) < 10:
+        raise HTTPException(status_code=400, detail="Appeal text is too short")
+
+    with engine.begin() as conn:
+        user = _get_user(conn, req.user_id)
+        incident = conn.execute(
+            text(
+                """
+                SELECT
+                    aal.id::text AS incident_id,
+                    aal.actor_user_id::text AS actor_user_id,
+                    aal.details
+                FROM admin_audit_logs aal
+                WHERE aal.id = CAST(:incident_id AS uuid)
+                  AND aal.action = 'guardrail_blocked_query'
+                """
+            ),
+            {"incident_id": incident_id},
+        ).mappings().first()
+        if not incident:
+            raise HTTPException(status_code=404, detail="Incident not found")
+        if incident.get("actor_user_id") != req.user_id:
+            raise HTTPException(status_code=403, detail="Incident does not belong to this user")
+
+        appeal_row = conn.execute(
+            text(
+                """
+                INSERT INTO guardrail_appeals (
+                    incident_id,
+                    user_id,
+                    appeal_text,
+                    status
+                )
+                VALUES (
+                    CAST(:incident_id AS uuid),
+                    CAST(:user_id AS uuid),
+                    :appeal_text,
+                    'pending'
+                )
+                ON CONFLICT (incident_id, user_id)
+                DO UPDATE SET
+                    appeal_text = EXCLUDED.appeal_text,
+                    status = 'pending',
+                    resolution_notes = NULL,
+                    reviewed_by_user_id = NULL,
+                    reviewed_at = NULL
+                RETURNING id::text AS appeal_id, created_at
+                """
+            ),
+            {
+                "incident_id": incident_id,
+                "user_id": req.user_id,
+                "appeal_text": appeal_text,
+            },
+        ).mappings().one()
+
+        details = incident.get("details") or {}
+        if not isinstance(details, dict):
+            details = {}
+        admins = [
+            row["id"]
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT id::text AS id
+                    FROM users
+                    WHERE role IN ('admin', 'supervisor')
+                    ORDER BY role, full_name
+                    """
+                )
+            ).mappings()
+        ]
+        for admin_id in admins:
+            _queue_notification(
+                conn,
+                user_id=admin_id,
+                event_type="guardrail_appeal_submitted",
+                severity="medium",
+                title=f"Guardrail appeal: {user.get('full_name') or 'Operator'}",
+                message=(
+                    f"Review requested for a {details.get('severity') or 'medium'} "
+                    f"{details.get('category') or 'guardrail'} incident."
+                ),
+                cta_url="/admin/analytics?focus=guardrails",
+                event_key=f"guardrail-appeal:{appeal_row['appeal_id']}:{admin_id}",
+            )
+
+    return {
+        "appeal_id": appeal_row["appeal_id"],
+        "status": "pending",
+        "created_at": _iso(appeal_row.get("created_at")),
+    }
+
+
+@app.get("/api/admin/guardrail/appeals")
+async def admin_guardrail_appeals(user_id: str, limit: int = 20):
+    safe_limit = max(1, min(int(limit or 20), 200))
+    with engine.connect() as conn:
+        user = _get_user(conn, user_id)
+        _require_admin_or_supervisor(user)
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT
+                        ga.id::text AS appeal_id,
+                        ga.appeal_text,
+                        ga.status,
+                        ga.resolution_notes,
+                        ga.created_at,
+                        ga.reviewed_at,
+                        requester.id::text AS requester_user_id,
+                        requester.full_name AS requester_name,
+                        requester.role AS requester_role,
+                        reviewer.full_name AS reviewed_by_name,
+                        aal.id::text AS incident_id,
+                        aal.details
+                    FROM guardrail_appeals ga
+                    JOIN users requester ON requester.id = ga.user_id
+                    JOIN admin_audit_logs aal ON aal.id = ga.incident_id
+                    LEFT JOIN users reviewer ON reviewer.id = ga.reviewed_by_user_id
+                    ORDER BY
+                        CASE ga.status WHEN 'pending' THEN 0 ELSE 1 END,
+                        ga.created_at DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"limit": safe_limit},
+            ).mappings()
+        ]
+
+    appeals = []
+    counts_by_status: dict[str, int] = {}
+    for row in rows:
+        details = row.get("details") or {}
+        if not isinstance(details, dict):
+            details = {}
+        status = str(row.get("status") or "pending")
+        counts_by_status[status] = counts_by_status.get(status, 0) + 1
+        appeals.append(
+            {
+                "appeal_id": row["appeal_id"],
+                "incident_id": row["incident_id"],
+                "requester_user_id": row.get("requester_user_id"),
+                "requester_name": row.get("requester_name"),
+                "requester_role": row.get("requester_role"),
+                "appeal_text": row.get("appeal_text"),
+                "status": status,
+                "resolution_notes": row.get("resolution_notes"),
+                "reviewed_by_name": row.get("reviewed_by_name"),
+                "created_at": _iso(row.get("created_at")),
+                "reviewed_at": _iso(row.get("reviewed_at")),
+                "incident_category": details.get("category"),
+                "incident_reason": details.get("reason"),
+                "incident_severity": details.get("severity") or "medium",
+                "query_excerpt": details.get("query_excerpt"),
+            }
+        )
+
+    return {
+        "appeals": appeals,
+        "summary": {
+            "total": len(appeals),
+            "counts_by_status": counts_by_status,
+        },
+    }
+
+
+@app.post("/api/admin/guardrail/appeals/{appeal_id}/review")
+async def review_guardrail_appeal(appeal_id: str, req: GuardrailAppealReviewRequest):
+    normalized_status = (req.status or "").strip().lower()
+    if normalized_status not in {"approved", "rejected"}:
+        raise HTTPException(status_code=400, detail="Invalid appeal status")
+
+    resolution_notes = re.sub(r"\s+", " ", (req.resolution_notes or "")).strip() or None
+
+    with engine.begin() as conn:
+        reviewer = _get_user(conn, req.user_id)
+        _require_admin_or_supervisor(reviewer)
+
+        appeal = conn.execute(
+            text(
+                """
+                SELECT
+                    ga.id::text AS appeal_id,
+                    ga.user_id::text AS requester_user_id,
+                    ga.incident_id::text AS incident_id,
+                    ga.status AS current_status,
+                    requester.full_name AS requester_name,
+                    aal.details
+                FROM guardrail_appeals ga
+                JOIN users requester ON requester.id = ga.user_id
+                JOIN admin_audit_logs aal ON aal.id = ga.incident_id
+                WHERE ga.id = CAST(:appeal_id AS uuid)
+                """
+            ),
+            {"appeal_id": appeal_id},
+        ).mappings().first()
+        if not appeal:
+            raise HTTPException(status_code=404, detail="Appeal not found")
+
+        if appeal.get("current_status") == normalized_status and resolution_notes is None:
+            return {
+                "appeal_id": appeal_id,
+                "status": normalized_status,
+                "reviewed": False,
+            }
+
+        updated = conn.execute(
+            text(
+                """
+                UPDATE guardrail_appeals
+                SET
+                    status = :status,
+                    resolution_notes = :resolution_notes,
+                    reviewed_by_user_id = CAST(:reviewed_by_user_id AS uuid),
+                    reviewed_at = NOW()
+                WHERE id = CAST(:appeal_id AS uuid)
+                RETURNING
+                    id::text AS appeal_id,
+                    status,
+                    resolution_notes,
+                    reviewed_at
+                """
+            ),
+            {
+                "appeal_id": appeal_id,
+                "status": normalized_status,
+                "resolution_notes": resolution_notes,
+                "reviewed_by_user_id": req.user_id,
+            },
+        ).mappings().one()
+
+        details = appeal.get("details") or {}
+        if not isinstance(details, dict):
+            details = {}
+
+        resolution_label = "approved" if normalized_status == "approved" else "rejected"
+        _queue_notification(
+            conn,
+            user_id=appeal["requester_user_id"],
+            event_type="guardrail_appeal_reviewed",
+            severity="info" if normalized_status == "approved" else "medium",
+            title="Guardrail appeal reviewed",
+            message=(
+                f"Your guardrail appeal was {resolution_label}."
+                + (
+                    f" Notes: {resolution_notes}"
+                    if resolution_notes
+                    else ""
+                )
+            ),
+            cta_url="/operator/reports?tab=guardrails",
+            event_key=f"guardrail-appeal-reviewed:{appeal_id}:{normalized_status}",
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO admin_audit_logs (
+                    actor_user_id,
+                    action,
+                    target_type,
+                    target_id,
+                    details,
+                    created_at
+                )
+                VALUES (
+                    CAST(:actor_user_id AS uuid),
+                    'guardrail_appeal_reviewed',
+                    'guardrail_appeal',
+                    :target_id,
+                    CAST(:details AS jsonb),
+                    NOW()
+                )
+                """
+            ),
+            {
+                "actor_user_id": req.user_id,
+                "target_id": appeal_id,
+                "details": json.dumps(
+                    {
+                        "incident_id": appeal.get("incident_id"),
+                        "requester_user_id": appeal.get("requester_user_id"),
+                        "requester_name": appeal.get("requester_name"),
+                        "status": normalized_status,
+                        "resolution_notes": resolution_notes,
+                        "incident_category": details.get("category"),
+                        "incident_reason": details.get("reason"),
+                    }
+                ),
+            },
+        )
+
+    return {
+        "appeal_id": updated["appeal_id"],
+        "status": updated["status"],
+        "resolution_notes": updated["resolution_notes"],
+        "reviewed_at": _iso(updated["reviewed_at"]),
+        "reviewed": True,
     }
 
 
@@ -4119,6 +5039,61 @@ async def speech_to_text(audio: UploadFile = File(...), language: str = Form("au
     }
 
 
+@app.post("/api/translate", response_model=TranslateResponse)
+async def translate_text(req: TranslateRequest):
+    _require_secret(settings.SARVAM_API_KEY, "SARVAM_API_KEY")
+
+    wants_hinglish = _is_hinglish_language(req.target_language)
+    source_language = _normalize_translation_language(req.source_language)
+    target_language = (
+        "hi-IN"
+        if wants_hinglish
+        else _normalize_translation_language(req.target_language, fallback="hi-IN")
+    )
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        translated_text = await _translate_text(
+            client,
+            req.text,
+            source_language,
+            target_language,
+        )
+        if wants_hinglish:
+            try:
+                translated_text = await _transliterate_to_hinglish(client, translated_text)
+            except Exception:
+                pass
+
+    return TranslateResponse(
+        text=req.text,
+        translated_text=translated_text,
+        source_language=source_language,
+        target_language="hinglish" if wants_hinglish else target_language,
+    )
+
+
+@app.post("/api/tts", response_model=SpeechSynthesisResponse)
+async def synthesize_text(req: SpeechSynthesisRequest):
+    _require_secret(settings.SARVAM_API_KEY, "SARVAM_API_KEY")
+
+    prepared_text = _prepare_tts_text(req.text)
+    tts_language = _get_tts_language(_normalize_translation_language(req.language))
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        audio_base64 = await _synthesize_speech(
+            client,
+            prepared_text,
+            tts_language,
+            req.speaker,
+        )
+
+    return SpeechSynthesisResponse(
+        text=prepared_text,
+        language=tts_language,
+        audio_base64=audio_base64,
+    )
+
+
 @app.post("/api/voice")
 async def voice_pipeline(
     audio: UploadFile = File(...),
@@ -4127,6 +5102,7 @@ async def voice_pipeline(
     user_id: str | None = Form(None),
     conversation_id: str | None = Form(None),
     chat_scope: str = Form("general"),
+    revision_id: str | None = Form(None),
 ):
     _require_secret(settings.GROQ_API_KEY, "GROQ_API_KEY")
     _require_secret(settings.SARVAM_API_KEY, "SARVAM_API_KEY")
@@ -4136,6 +5112,9 @@ async def voice_pipeline(
 
     normalized_scope = _normalize_chat_scope(chat_scope)
     audio_bytes = await audio.read()
+    conversation_metadata: dict[str, Any] = {}
+    if normalized_scope == "reader" and revision_id:
+        conversation_metadata["revision_id"] = revision_id
 
     history: list[dict[str, str]] = []
     if user_id:
@@ -4153,6 +5132,25 @@ async def voice_pipeline(
                         detail=(
                             "Conversation scope mismatch. "
                             f"Expected '{normalized_scope}', found '{conversation_scope}'."
+                        ),
+                    )
+                conversation = _get_chat_conversation(
+                    conn,
+                    conversation_id,
+                    user_id,
+                    chat_scope=normalized_scope,
+                )
+                if (
+                    normalized_scope == "reader"
+                    and revision_id
+                    and conversation.get("revision_id")
+                    and conversation.get("revision_id") != revision_id
+                ):
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "Reader conversation revision mismatch. "
+                            "Start a new reader conversation for this document."
                         ),
                     )
                 history = _history_from_messages(
@@ -4205,6 +5203,7 @@ async def voice_pipeline(
                         language=detected_language,
                         title=_conversation_title_from_query(spoken_text),
                         chat_scope=normalized_scope,
+                        metadata=conversation_metadata,
                     )
                     conversation_id = conversation["id"]
 
@@ -4261,12 +5260,16 @@ async def voice_pipeline(
 
     contextual_query = _build_contextual_query(normalized_query or spoken_text, history)
     rewritten_query = contextual_query
-    rewrite_result = rewrite_query_with_dspy(
-        contextual_query,
-        language=detected_language,
-        role="reader_copilot" if normalized_scope == "reader" else "operator",
-        history=history,
-    )
+    rewrite_result = None
+    if normalized_scope != "reader":
+        rewrite_result = await _run_blocking_with_timeout(
+            DSPY_REWRITE_TIMEOUT_SECONDS,
+            rewrite_query_with_dspy,
+            contextual_query,
+            language=detected_language,
+            role="operator",
+            history=history,
+        )
     if rewrite_result and rewrite_result.get("rewritten_query"):
         rewritten_query = rewrite_result["rewritten_query"]
 
@@ -4280,6 +5283,7 @@ async def voice_pipeline(
         role="operator",
         user_id=user_id,
         top_k=effective_top_k,
+        revision_id=revision_id if normalized_scope == "reader" else None,
     )
     evidence = retrieval_result.get("evidence", [])
     assistant_text = await _generate_grounded_answer(
@@ -4344,6 +5348,7 @@ async def voice_pipeline(
                     language=detected_language,
                     title=_conversation_title_from_query(spoken_text),
                     chat_scope=normalized_scope,
+                    metadata=conversation_metadata,
                 )
                 conversation_id = conversation["id"]
 

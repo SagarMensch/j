@@ -27,6 +27,12 @@ _DANGEROUS_PATTERNS: dict[str, tuple[str, ...]] = {
         r"\b(hack|breach|ransomware|malware|ddos)\b",
         r"\bsteal\s+(credentials|passwords|data)\b",
     ),
+    "self_harm": (
+        r"\b(kill myself|harm myself|self[- ]?harm|suicide|end my life)\b",
+    ),
+    "weapon_construction": (
+        r"\b(how\s+to|steps?\s+to|instructions?\s+to)\b.{0,48}\b(make|build|assemble|create)\b.{0,48}\b(gun|firearm|weapon|silencer|ghost gun)\b",
+    ),
 }
 
 _OFFENSIVE_PATTERNS: dict[str, tuple[str, ...]] = {
@@ -38,17 +44,63 @@ _OFFENSIVE_PATTERNS: dict[str, tuple[str, ...]] = {
     ),
 }
 
+_INSTRUCTIONAL_INTENT_PATTERNS: tuple[str, ...] = (
+    r"\bhow\s+to\b",
+    r"\bshow\s+me\s+how\s+to\b",
+    r"\bteach\s+me\s+to\b",
+    r"\bsteps?\s+to\b",
+    r"\binstructions?\s+(for|to)\b",
+    r"\bguide\s+me\s+to\b",
+)
+
+_CHEMISTRY_ACTION_PATTERNS: tuple[str, ...] = (
+    r"\b(make|create|mix|synthesize|prepare|manufacture|formulate|cook)\b",
+)
+
+_DANGEROUS_CHEMISTRY_PATTERNS: tuple[str, ...] = (
+    r"\bdangerous\s+chemical(s)?\b",
+    r"\btoxic\s+(chemical|gas|compound|substance)s?\b",
+    r"\bpoison(ous)?\b",
+    r"\btoxin(s)?\b",
+    r"\bcyanide\b",
+    r"\bchloroform\b",
+    r"\bmustard\s+gas\b",
+    r"\bchlorine\s+gas\b",
+    r"\bnerve\s+agent\b",
+    r"\bchemical\s+weapon(s)?\b",
+)
+
+
+def _collect_matches(text: str, patterns: tuple[str, ...]) -> tuple[str, ...]:
+    matches: list[str] = []
+    for pattern in patterns:
+        found = re.finditer(pattern, text, flags=re.IGNORECASE)
+        for item in found:
+            matches.append(item.group(0))
+    return tuple(sorted({m.strip().lower() for m in matches if str(m).strip()}))
+
+
+def _detect_dangerous_chemistry(text: str) -> tuple[str, tuple[str, ...]] | None:
+    intent_matches = _collect_matches(text, _INSTRUCTIONAL_INTENT_PATTERNS)
+    if not intent_matches:
+        return None
+
+    action_matches = _collect_matches(text, _CHEMISTRY_ACTION_PATTERNS)
+    chemistry_matches = _collect_matches(text, _DANGEROUS_CHEMISTRY_PATTERNS)
+    if action_matches and chemistry_matches:
+        combined = tuple(sorted(set(intent_matches + action_matches + chemistry_matches)))
+        return "dangerous_chemistry_instructions", combined
+
+    return None
+
 
 def _find_matches(text: str, pattern_group: dict[str, tuple[str, ...]]) -> tuple[str, tuple[str, ...]] | None:
     for reason, patterns in pattern_group.items():
         matches: list[str] = []
         for pattern in patterns:
-            found = re.findall(pattern, text, flags=re.IGNORECASE)
+            found = re.finditer(pattern, text, flags=re.IGNORECASE)
             for item in found:
-                if isinstance(item, tuple):
-                    matches.append(" ".join(part for part in item if part))
-                else:
-                    matches.append(str(item))
+                matches.append(item.group(0))
         if matches:
             normalized = tuple(sorted({m.strip().lower() for m in matches if str(m).strip()}))
             return reason, normalized
@@ -71,6 +123,21 @@ def evaluate_guardrail(text: str) -> GuardrailDecision:
             user_message=(
                 "I cannot assist with harmful, unsafe, or sabotage-related requests. "
                 "This request has been escalated to supervisors."
+            ),
+            matched_terms=matched,
+        )
+
+    dangerous_chemistry = _detect_dangerous_chemistry(normalized)
+    if dangerous_chemistry:
+        reason, matched = dangerous_chemistry
+        return GuardrailDecision(
+            blocked=True,
+            category="dangerous",
+            reason=reason,
+            severity="high",
+            user_message=(
+                "I cannot assist with dangerous chemistry, harmful synthesis, or unsafe "
+                "instructional requests. This request has been escalated to supervisors."
             ),
             matched_terms=matched,
         )

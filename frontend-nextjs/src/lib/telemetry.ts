@@ -7,6 +7,8 @@ export type TelemetryEvent =
   | "ui.viewer_highlight_opened"
   | "ui.training_assignments_opened"
   | "ui.training_module_opened"
+  | "ui.training_step_translated"
+  | "ui.training_step_spoken"
   | "ui.training_step_advanced"
   | "ui.training_module_completed"
   | "ui.assessment_opened"

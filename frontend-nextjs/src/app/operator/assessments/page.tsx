@@ -6,7 +6,7 @@ import { OperatorLayout } from "@/components/operator/operator-layout";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useAuth } from "@/lib/auth-context";
+import { AppLanguage, useAuth } from "@/lib/auth-context";
 import { apiClient } from "@/lib/api";
 import {
   ScoreRing,
@@ -30,8 +30,181 @@ type AssessmentRow = {
   status: "available" | "passed" | "failed";
 };
 
+type AssessmentCopy = {
+  workspaceTag: string;
+  title: string;
+  subtitle: string;
+  operatorLabel: string;
+  fallbackUser: string;
+  assessmentScore: string;
+  reliability: string;
+  averageScoreLabel: (value: number) => string;
+  passed: string;
+  open: string;
+  retry: string;
+  attemptRules: string;
+  highlightedQuiz: string;
+  noActiveAssessment: string;
+  highlightedHint: string;
+  highlightedMeta: (questions: number, passMark: number) => string;
+  attempted: string;
+  passRate: string;
+  averageScore: string;
+  boardTitle: string;
+  loading: string;
+  noAssessments: string;
+  noAssessmentsHint: string;
+  passedStatus: string;
+  retryRequired: string;
+  available: string;
+  questions: string;
+  passMark: string;
+  duration: string;
+  lastScore: string;
+  notAttempted: string;
+  review: string;
+  retryAction: string;
+  takeAssessment: string;
+  passLane: string;
+  passLaneBody: string;
+  openLane: string;
+  openLaneBody: string;
+  retryLane: string;
+  retryLaneBody: string;
+};
+
+const COPY: Record<AppLanguage, AssessmentCopy> = {
+  ENG: {
+    workspaceTag: "Assessment",
+    title: "Assessments",
+    subtitle: "Readiness checks linked to your assigned training.",
+    operatorLabel: "Operator",
+    fallbackUser: "User",
+    assessmentScore: "Assessment score",
+    reliability: "Assessment reliability",
+    averageScoreLabel: (value) => `Average score ${value}%`,
+    passed: "Passed",
+    open: "Open",
+    retry: "Retry",
+    attemptRules: "Attempt rules",
+    highlightedQuiz: "Highlighted quiz",
+    noActiveAssessment: "No active assessment",
+    highlightedHint: "Waiting for the next generated assessment.",
+    highlightedMeta: (questions, passMark) => `${questions} questions | ${passMark}% pass mark`,
+    attempted: "Attempted",
+    passRate: "Pass rate",
+    averageScore: "Average score",
+    boardTitle: "Assessment board",
+    loading: "Loading assessments...",
+    noAssessments: "No assessments assigned yet",
+    noAssessmentsHint: "Publish a training document to generate an assessment automatically.",
+    passedStatus: "Passed",
+    retryRequired: "Retry required",
+    available: "Available",
+    questions: "Questions",
+    passMark: "Pass mark",
+    duration: "Duration",
+    lastScore: "Last score",
+    notAttempted: "Not attempted",
+    review: "Review",
+    retryAction: "Retry",
+    takeAssessment: "Take assessment",
+    passLane: "Pass lane",
+    passLaneBody: "Assessments completed with a passing score.",
+    openLane: "Open lane",
+    openLaneBody: "Assessments ready to be taken now.",
+    retryLane: "Retry lane",
+    retryLaneBody: "Assessments that need another attempt.",
+  },
+  HIN: {
+    workspaceTag: "जांच",
+    title: "जांच",
+    subtitle: "आपकी ट्रेनिंग से जुड़ी तैयारी जांच।",
+    operatorLabel: "ऑपरेटर",
+    fallbackUser: "यूज़र",
+    assessmentScore: "जांच स्कोर",
+    reliability: "जांच स्थिति",
+    averageScoreLabel: (value) => `औसत स्कोर ${value}%`,
+    passed: "पास",
+    open: "खुला",
+    retry: "फिर से",
+    attemptRules: "नियम",
+    highlightedQuiz: "मुख्य क्विज",
+    noActiveAssessment: "कोई चालू जांच नहीं",
+    highlightedHint: "अगली जांच का इंतजार है।",
+    highlightedMeta: (questions, passMark) => `${questions} सवाल | ${passMark}% पास मार्क`,
+    attempted: "कोशिश",
+    passRate: "पास दर",
+    averageScore: "औसत स्कोर",
+    boardTitle: "जांच सूची",
+    loading: "जांच लोड हो रही है...",
+    noAssessments: "अभी कोई जांच नहीं मिली",
+    noAssessmentsHint: "ट्रेनिंग दस्तावेज पब्लिश होने पर जांच अपने आप बनेगी।",
+    passedStatus: "पास",
+    retryRequired: "फिर से दें",
+    available: "उपलब्ध",
+    questions: "सवाल",
+    passMark: "पास मार्क",
+    duration: "समय",
+    lastScore: "पिछला स्कोर",
+    notAttempted: "कोशिश नहीं हुई",
+    review: "देखें",
+    retryAction: "फिर से दें",
+    takeAssessment: "जांच दें",
+    passLane: "पास लाइन",
+    passLaneBody: "जो जांच पास हो चुकी हैं।",
+    openLane: "खुली लाइन",
+    openLaneBody: "जो जांच अभी दी जा सकती हैं।",
+    retryLane: "फिर से लाइन",
+    retryLaneBody: "जिन्हें दोबारा देना है।",
+  },
+  HING: {
+    workspaceTag: "Assessment",
+    title: "Assessments",
+    subtitle: "Aapki training se judi readiness checks.",
+    operatorLabel: "Operator",
+    fallbackUser: "User",
+    assessmentScore: "Assessment score",
+    reliability: "Assessment status",
+    averageScoreLabel: (value) => `Average score ${value}%`,
+    passed: "Passed",
+    open: "Open",
+    retry: "Retry",
+    attemptRules: "Rules",
+    highlightedQuiz: "Main quiz",
+    noActiveAssessment: "Koi active assessment nahi",
+    highlightedHint: "Next assessment ka wait hai.",
+    highlightedMeta: (questions, passMark) => `${questions} questions | ${passMark}% pass mark`,
+    attempted: "Attempted",
+    passRate: "Pass rate",
+    averageScore: "Average score",
+    boardTitle: "Assessment board",
+    loading: "Assessments load ho rahe hain...",
+    noAssessments: "Abhi koi assessment assign nahi hua",
+    noAssessmentsHint: "Training document publish hote hi assessment ban jayega.",
+    passedStatus: "Passed",
+    retryRequired: "Retry required",
+    available: "Available",
+    questions: "Questions",
+    passMark: "Pass mark",
+    duration: "Duration",
+    lastScore: "Last score",
+    notAttempted: "Not attempted",
+    review: "Review",
+    retryAction: "Retry",
+    takeAssessment: "Take assessment",
+    passLane: "Pass lane",
+    passLaneBody: "Jo assessments pass ho chuki hain.",
+    openLane: "Open lane",
+    openLaneBody: "Jo assessments abhi ready hain.",
+    retryLane: "Retry lane",
+    retryLaneBody: "Jin assessments ko dobara dena hai.",
+  },
+};
+
 export default function AssessmentsPage() {
-  const { user } = useAuth();
+  const { user, language } = useAuth();
+  const copy = COPY[language];
   const [assessments, setAssessments] = useState<AssessmentRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -113,22 +286,21 @@ export default function AssessmentsPage() {
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
-                Assessment Workspace
+                {copy.workspaceTag}
               </p>
               <h1 className="mt-2 text-2xl font-bold text-foreground">
-                Assessments
+                {copy.title}
               </h1>
               <p className="mt-2 text-sm text-muted">
-                Generated readiness checks linked to your assigned training
-                modules and approved document sources.
+                {copy.subtitle}
               </p>
             </div>
             <div className="text-right">
               <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
-                Operator
+                {copy.operatorLabel}
               </p>
               <p className="mt-1 font-semibold text-foreground">
-                {user?.name || "User"}
+                {user?.name || copy.fallbackUser}
               </p>
             </div>
           </div>
@@ -136,17 +308,17 @@ export default function AssessmentsPage() {
 
         <div className="grid gap-4 xl:grid-cols-[0.82fr_1.18fr]">
           <div className="space-y-4">
-            <Card title="Assessment Score">
+            <Card title={copy.assessmentScore}>
               <div className="space-y-4">
                 <ScoreRing
                   value={stats.passRate}
-                  title="Assessment Reliability"
-                  subtitle={`Average score ${stats.averageScore}%`}
+                  title={copy.reliability}
+                  subtitle={copy.averageScoreLabel(stats.averageScore)}
                 />
                 <div className="grid grid-cols-3 gap-2">
                   <div className="rounded-[12px] border border-border bg-[#f8fbfa] px-3 py-3">
                     <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
-                      Passed
+                      {copy.passed}
                     </p>
                     <p className="mt-1 text-xl font-bold text-accent">
                       {stats.passed}
@@ -154,7 +326,7 @@ export default function AssessmentsPage() {
                   </div>
                   <div className="rounded-[12px] border border-border bg-[#f7f9ff] px-3 py-3">
                     <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
-                      Open
+                      {copy.open}
                     </p>
                     <p className="mt-1 text-xl font-bold text-primary">
                       {stats.available}
@@ -162,7 +334,7 @@ export default function AssessmentsPage() {
                   </div>
                   <div className="rounded-[12px] border border-border bg-[#fff3f1] px-3 py-3">
                     <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
-                      Retry
+                      {copy.retry}
                     </p>
                     <p className="mt-1 text-xl font-bold text-danger">
                       {stats.failed}
@@ -172,36 +344,39 @@ export default function AssessmentsPage() {
               </div>
             </Card>
 
-            <Card title="Attempt Rules">
+            <Card title={copy.attemptRules}>
               <div className="space-y-3">
                 <div className="rounded-[14px] border border-border bg-[#f7faff] px-3 py-3">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
-                    Highlighted Quiz
+                    {copy.highlightedQuiz}
                   </p>
                   <p className="mt-1 text-base font-semibold text-foreground">
-                    {highlightedAssessment?.title || "No active assessment"}
+                    {highlightedAssessment?.title || copy.noActiveAssessment}
                   </p>
                   <p className="mt-1 text-sm text-muted">
                     {highlightedAssessment
-                      ? `${highlightedAssessment.question_count} questions | ${highlightedAssessment.passing_score}% pass mark`
-                      : "Waiting for the next generated assessment."}
+                      ? copy.highlightedMeta(
+                          highlightedAssessment.question_count,
+                          highlightedAssessment.passing_score,
+                        )
+                      : copy.highlightedHint}
                   </p>
                 </div>
                 <div className="space-y-2 text-sm text-muted">
                   <div className="flex items-center justify-between rounded-[12px] border border-border bg-white px-3 py-2.5">
-                    <span>Attempted</span>
+                    <span>{copy.attempted}</span>
                     <span className="font-semibold text-foreground">
                       {stats.attempted}
                     </span>
                   </div>
                   <div className="flex items-center justify-between rounded-[12px] border border-border bg-white px-3 py-2.5">
-                    <span>Pass Rate</span>
+                    <span>{copy.passRate}</span>
                     <span className="font-semibold text-foreground">
                       {stats.passRate}%
                     </span>
                   </div>
                   <div className="flex items-center justify-between rounded-[12px] border border-border bg-white px-3 py-2.5">
-                    <span>Average Score</span>
+                    <span>{copy.averageScore}</span>
                     <span className="font-semibold text-foreground">
                       {stats.averageScore}%
                     </span>
@@ -218,12 +393,12 @@ export default function AssessmentsPage() {
             />
           </div>
 
-          <Card title="Assessment Board" className="!p-0">
+          <Card title={copy.boardTitle} className="!p-0">
             <div className="space-y-3 p-4">
               {isLoading ? (
                 <div className="py-12 text-center text-muted">
                   <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-                  <p>Loading assessments...</p>
+                  <p>{copy.loading}</p>
                 </div>
               ) : error ? (
                 <div className="py-6 text-center">
@@ -232,11 +407,10 @@ export default function AssessmentsPage() {
               ) : assessments.length === 0 ? (
                 <div className="py-10 text-center">
                   <h2 className="text-lg font-semibold text-foreground">
-                    No assessments assigned yet
+                    {copy.noAssessments}
                   </h2>
                   <p className="mt-2 text-sm text-muted">
-                    Upload and publish a training document to generate the
-                    corresponding assessment automatically.
+                    {copy.noAssessmentsHint}
                   </p>
                 </div>
               ) : (
@@ -271,10 +445,10 @@ export default function AssessmentsPage() {
                               }
                             >
                               {assessment.status === "passed"
-                                ? "Passed"
+                                ? copy.passedStatus
                                 : assessment.status === "failed"
-                                  ? "Retry Required"
-                                  : "Available"}
+                                  ? copy.retryRequired
+                                  : copy.available}
                             </Badge>
                           </div>
                           <p className="mt-1 text-sm text-muted">
@@ -283,7 +457,7 @@ export default function AssessmentsPage() {
                           <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                             <div className="rounded-[12px] border border-border bg-white px-3 py-2.5">
                               <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
-                                Questions
+                                {copy.questions}
                               </p>
                               <p className="mt-1 text-sm font-semibold text-foreground">
                                 {assessment.question_count}
@@ -291,7 +465,7 @@ export default function AssessmentsPage() {
                             </div>
                             <div className="rounded-[12px] border border-border bg-white px-3 py-2.5">
                               <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
-                                Pass Mark
+                                {copy.passMark}
                               </p>
                               <p className="mt-1 text-sm font-semibold text-foreground">
                                 {assessment.passing_score}%
@@ -299,7 +473,7 @@ export default function AssessmentsPage() {
                             </div>
                             <div className="rounded-[12px] border border-border bg-white px-3 py-2.5">
                               <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
-                                Duration
+                                {copy.duration}
                               </p>
                               <p className="mt-1 text-sm font-semibold text-foreground">
                                 {assessment.time_limit_seconds
@@ -312,12 +486,12 @@ export default function AssessmentsPage() {
                             </div>
                             <div className="rounded-[12px] border border-border bg-white px-3 py-2.5">
                               <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
-                                Last Score
+                                {copy.lastScore}
                               </p>
                               <p className="mt-1 text-sm font-semibold text-foreground">
                                 {assessment.latest_score !== null
                                   ? `${Math.round(assessment.latest_score)}%`
-                                  : "Not attempted"}
+                                  : copy.notAttempted}
                               </p>
                             </div>
                           </div>
@@ -333,10 +507,10 @@ export default function AssessmentsPage() {
                             }
                           >
                             {assessment.status === "passed"
-                              ? "Review"
+                              ? copy.review
                               : assessment.status === "failed"
-                                ? "Retry"
-                                : "Take Assessment"}
+                                ? copy.retryAction
+                                : copy.takeAssessment}
                           </Button>
                         </Link>
                       </div>
@@ -353,13 +527,13 @@ export default function AssessmentsPage() {
             <div className="space-y-2">
               <div className="h-1.5 w-14 rounded-full bg-accent" />
               <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">
-                Pass Lane
+                {copy.passLane}
               </p>
               <p className="text-3xl font-bold text-foreground">
                 {stats.passed}
               </p>
               <p className="text-sm text-muted">
-                Completed assessments with passing outcome.
+                {copy.passLaneBody}
               </p>
             </div>
           </Card>
@@ -367,13 +541,13 @@ export default function AssessmentsPage() {
             <div className="space-y-2">
               <div className="h-1.5 w-14 rounded-full bg-primary" />
               <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">
-                Open Lane
+                {copy.openLane}
               </p>
               <p className="text-3xl font-bold text-foreground">
                 {stats.available}
               </p>
               <p className="text-sm text-muted">
-                Assessments ready to be taken in the current cycle.
+                {copy.openLaneBody}
               </p>
             </div>
           </Card>
@@ -381,13 +555,13 @@ export default function AssessmentsPage() {
             <div className="space-y-2">
               <div className="h-1.5 w-14 rounded-full bg-danger" />
               <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">
-                Retry Lane
+                {copy.retryLane}
               </p>
               <p className="text-3xl font-bold text-foreground">
                 {stats.failed}
               </p>
               <p className="text-sm text-muted">
-                Assessments needing another attempt before sign-off.
+                {copy.retryLaneBody}
               </p>
             </div>
           </Card>

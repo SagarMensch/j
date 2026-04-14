@@ -5,7 +5,13 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { OperatorLayout } from "@/components/operator/operator-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { DocumentStackIcon } from "@/components/ui/icons";
+import {
+  DocumentStackIcon,
+  MicPulseIcon,
+  SpeakerWaveIcon,
+  StopSquareIcon,
+  TranslateSparkIcon,
+} from "@/components/ui/icons";
 import { apiClient, API_BASE_URL } from "@/lib/api";
 import { AppLanguage, useAuth } from "@/lib/auth-context";
 import { trackEvent } from "@/lib/telemetry";
@@ -15,12 +21,32 @@ type ReaderCopy = {
   subtitle: string;
   docPanelTitle: string;
   chatPanelTitle: string;
+  currentRevision: string;
   askPlaceholder: string;
   askButton: string;
   queryError: string;
+  voiceError: string;
+  voiceUnsupported: string;
+  voiceReady: string;
+  listening: string;
+  processing: string;
+  playing: string;
   loadingPage: string;
   noPreview: string;
   docSelectLabel: string;
+  pageLabel: string;
+  prevPage: string;
+  nextPage: string;
+  jumpToPage: string;
+  goLabel: string;
+  conversationLive: string;
+  emptyChatHint: string;
+  translateHindi: string;
+  hideHindi: string;
+  speakAnswer: string;
+  stopAudio: string;
+  hindiTranslation: string;
+  generating: string;
 };
 
 type DocumentSummary = {
@@ -61,6 +87,32 @@ type QueryApiResponse = {
   answer: string;
   conversation_id?: string;
   evidence?: QueryEvidencePayload[];
+};
+
+type TranslationApiResponse = {
+  translated_text: string;
+  source_language: string;
+  target_language: string;
+};
+
+type SpeechSynthesisApiResponse = {
+  text: string;
+  language: string;
+  audio_base64: string;
+  audio_mime_type?: string;
+};
+
+type VoiceApiResponse = {
+  user_text: string;
+  assistant_text: string;
+  assistant_tts_text?: string;
+  audio_base64?: string;
+  audio_mime_type?: string;
+  detected_language?: string;
+  tts_language?: string;
+  stt_status?: string;
+  conversation_id?: string;
+  citations?: QueryEvidencePayload[];
 };
 
 type ConversationSummaryPayload = {
@@ -113,7 +165,15 @@ type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   citations: CitationType[];
+  language?: string | null;
+  translatedHindi?: string | null;
+  ttsText?: string | null;
+  audioBase64?: string;
+  audioMimeType?: string;
+  ttsLanguage?: string | null;
 };
+
+type VoiceState = "idle" | "recording" | "processing" | "playing";
 
 const COPY: Record<AppLanguage, ReaderCopy> = {
   ENG: {
@@ -122,38 +182,98 @@ const COPY: Record<AppLanguage, ReaderCopy> = {
       "Select a company document, read it on the left, and ask naturally on the right.",
     docPanelTitle: "Document Reader",
     chatPanelTitle: "Chat",
+    currentRevision: "Current",
     askPlaceholder: "Ask anything about the selected document...",
     askButton: "Ask",
     queryError: "Could not connect to backend right now.",
+    voiceError: "Voice query failed. Please try again.",
+    voiceUnsupported: "Voice input is not supported in this browser.",
+    voiceReady: "Use mic to ask from this document. Audio only plays when you tap speak.",
+    listening: "Listening. Speak now.",
+    processing: "Processing voice query...",
+    playing: "Audio answer is playing.",
     loadingPage: "Loading page...",
     noPreview: "Page preview not available for this revision/page.",
     docSelectLabel: "Document",
+    pageLabel: "Page",
+    prevPage: "Prev Page",
+    nextPage: "Next Page",
+    jumpToPage: "Jump to page",
+    goLabel: "Go",
+    conversationLive: "Conversation live",
+    emptyChatHint: "Ask naturally or use the mic. Answers stay grounded to this document.",
+    translateHindi: "Translate to Hindi",
+    hideHindi: "Hide Hindi translation",
+    speakAnswer: "Speak answer",
+    stopAudio: "Stop audio",
+    hindiTranslation: "Hindi translation",
+    generating: "Generating response...",
   },
   HIN: {
-    title: "Reader Workspace",
+    title: "रीडर",
     subtitle:
-      "Company document select karein, left mein padhein aur right mein naturally poochein.",
-    docPanelTitle: "Document Reader",
-    chatPanelTitle: "Chat",
-    askPlaceholder: "Selected document ke baare mein kuch bhi poochein...",
-    askButton: "Poochhein",
-    queryError: "Abhi backend se connect nahi ho pa raha.",
-    loadingPage: "Page load ho raha hai...",
-    noPreview: "Is revision/page ke liye page preview available nahi hai.",
-    docSelectLabel: "Document",
+      "कंपनी का दस्तावेज चुनें, बाएं पढ़ें और दाएं पूछें।",
+    docPanelTitle: "दस्तावेज",
+    chatPanelTitle: "चैट",
+    currentRevision: "चालू",
+    askPlaceholder: "चुने हुए दस्तावेज के बारे में पूछें...",
+    askButton: "पूछें",
+    queryError: "अभी बैकएंड से जुड़ नहीं पा रहा।",
+    voiceError: "आवाज वाला सवाल नहीं चला। फिर से कोशिश करें।",
+    voiceUnsupported: "इस ब्राउज़र में आवाज से पूछना उपलब्ध नहीं है।",
+    voiceReady: "माइक दबाकर इसी दस्तावेज से पूछें। आवाज तभी बजेगी जब आप सुनें दबाएंगे।",
+    listening: "सुन रहा है। अब बोलिए।",
+    processing: "आवाज वाला सवाल चल रहा है...",
+    playing: "आवाज वाला जवाब चल रहा है।",
+    loadingPage: "पेज लोड हो रहा है...",
+    noPreview: "इस पेज का प्रीव्यू उपलब्ध नहीं है।",
+    docSelectLabel: "दस्तावेज",
+    pageLabel: "पेज",
+    prevPage: "पिछला",
+    nextPage: "अगला",
+    jumpToPage: "पेज पर जाएं",
+    goLabel: "जाएं",
+    conversationLive: "चैट चालू",
+    emptyChatHint: "सीधा पूछें या माइक इस्तेमाल करें। जवाब इसी दस्तावेज से रहेगा।",
+    translateHindi: "हिंदी में देखें",
+    hideHindi: "हिंदी छुपाएं",
+    speakAnswer: "जवाब सुनें",
+    stopAudio: "आवाज रोकें",
+    hindiTranslation: "हिंदी अनुवाद",
+    generating: "जवाब बन रहा है...",
   },
   HING: {
-    title: "Reader Workspace",
+    title: "Reader",
     subtitle:
-      "Company document select karo, left mein padho aur right mein naturally pucho.",
-    docPanelTitle: "Document Reader",
+      "Company document select karo, left me padho aur right me pucho.",
+    docPanelTitle: "Document",
     chatPanelTitle: "Chat",
+    currentRevision: "Current",
     askPlaceholder: "Selected document ke baare mein kuch bhi pucho...",
     askButton: "Pucho",
     queryError: "Abhi backend se connect nahi ho pa raha.",
+    voiceError: "Voice query fail ho gayi. Dobara try karo.",
+    voiceUnsupported: "Is browser mein voice input supported nahi hai.",
+    voiceReady: "Mic dabake isi document se pucho. Audio sirf speak dabane par chalega.",
+    listening: "Listening. Ab bolo.",
+    processing: "Voice query process ho rahi hai...",
+    playing: "Audio answer chal raha hai.",
     loadingPage: "Page load ho raha hai...",
     noPreview: "Is revision/page ke liye page preview available nahi hai.",
     docSelectLabel: "Document",
+    pageLabel: "Page",
+    prevPage: "Prev",
+    nextPage: "Next",
+    jumpToPage: "Page par jao",
+    goLabel: "Go",
+    conversationLive: "Chat live",
+    emptyChatHint: "Seedha pucho ya mic use karo. Answer isi document se rahega.",
+    translateHindi: "Hindi me dekho",
+    hideHindi: "Hindi chhupao",
+    speakAnswer: "Answer suno",
+    stopAudio: "Audio roko",
+    hindiTranslation: "Hindi translation",
+    generating: "Answer ban raha hai...",
   },
 };
 
@@ -163,6 +283,26 @@ function normalizeApiAssetUrl(url?: string | null) {
     return url;
   }
   return `${API_BASE_URL}${url.startsWith("/") ? url : `/${url}`}`;
+}
+
+function createLocalMessageId(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function toQueryLanguage(appLanguage: AppLanguage) {
+  return appLanguage === "ENG" ? "en" : "hi";
+}
+
+function toSpeechLanguage(appLanguage: AppLanguage) {
+  return appLanguage === "ENG" ? "en-IN" : "hi-IN";
+}
+
+function isHindiLike(languageCode?: string | null, text?: string) {
+  const normalized = (languageCode || "").toLowerCase();
+  if (normalized.startsWith("hi")) {
+    return true;
+  }
+  return /[\u0900-\u097F]/.test(text || "");
 }
 
 function parsePositiveInt(value: string | null | undefined, fallback = 1) {
@@ -189,7 +329,7 @@ export default function OperatorReaderPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, language } = useAuth();
+  const { user, language, setLanguage } = useAuth();
 
   const revisionId = params.revisionId as string;
   const copy = COPY[language];
@@ -205,6 +345,7 @@ export default function OperatorReaderPage() {
 
   const [question, setQuestion] = useState("");
   const [isQuerying, setIsQuerying] = useState(false);
+  const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [conversationId, setConversationId] = useState<string | null>(
     initialConversationId || null,
   );
@@ -212,6 +353,15 @@ export default function OperatorReaderPage() {
   const [activeCitation, setActiveCitation] = useState<CitationType | null>(
     null,
   );
+  const [activeAudioMessageId, setActiveAudioMessageId] = useState<
+    string | null
+  >(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const activeAudioUrlRef = useRef<string | null>(null);
+  const voiceAbortControllerRef = useRef<AbortController | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const fallbackCode = searchParams.get("code") || "DOCUMENT";
@@ -220,6 +370,9 @@ export default function OperatorReaderPage() {
     documents.find((doc) => doc.revision_id === revisionId) || null;
   const totalPages = Number(documentMeta?.pages || 0);
   const pageImageUrl = normalizeApiAssetUrl(pagePayload?.page.image_url);
+  const isListening = voiceState === "recording";
+  const isVoiceProcessing = voiceState === "processing";
+  const isVoicePlaying = voiceState === "playing";
 
   const mapCitationPayload = (ev: QueryEvidencePayload): CitationType => ({
     chunkId: ev.chunk_id,
@@ -240,6 +393,8 @@ export default function OperatorReaderPage() {
     role: message.role === "user" ? "user" : "assistant",
     content: message.content,
     citations: (message.citations || []).map(mapCitationPayload),
+    language: message.language,
+    ttsText: message.content,
   });
 
   function goToPage(nextPage: number) {
@@ -278,6 +433,183 @@ export default function OperatorReaderPage() {
     goToPage(targetPage);
   }
 
+  const getRecordingMimeType = () => {
+    if (
+      typeof MediaRecorder === "undefined" ||
+      !MediaRecorder.isTypeSupported
+    ) {
+      return undefined;
+    }
+
+    const supportedMimeTypes = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/mp4",
+    ];
+
+    return supportedMimeTypes.find((mimeType) =>
+      MediaRecorder.isTypeSupported(mimeType),
+    );
+  };
+
+  const stopVoicePlayback = (nextState: VoiceState = "idle") => {
+    activeAudioRef.current?.pause();
+    activeAudioRef.current = null;
+    if (activeAudioUrlRef.current) {
+      URL.revokeObjectURL(activeAudioUrlRef.current);
+      activeAudioUrlRef.current = null;
+    }
+    setActiveAudioMessageId(null);
+    setVoiceState((current) =>
+      current === "playing" || nextState !== "idle" ? nextState : current,
+    );
+  };
+
+  const playAudioBase64 = async (
+    audioBase64?: string,
+    audioMimeType = "audio/wav",
+    messageId?: string | null,
+  ) => {
+    if (!audioBase64) {
+      setVoiceState("idle");
+      setActiveAudioMessageId(null);
+      return;
+    }
+
+    try {
+      const binaryString = window.atob(audioBase64);
+      const byteArray = new Uint8Array(binaryString.length);
+      for (let index = 0; index < binaryString.length; index += 1) {
+        byteArray[index] = binaryString.charCodeAt(index);
+      }
+
+      stopVoicePlayback();
+
+      const audioBlob = new Blob([byteArray], { type: audioMimeType });
+      const audioUrl = URL.createObjectURL(audioBlob);
+      activeAudioUrlRef.current = audioUrl;
+
+      const audio = new Audio(audioUrl);
+      audio.onended = () => stopVoicePlayback();
+      audio.onerror = () => stopVoicePlayback();
+      activeAudioRef.current = audio;
+      setActiveAudioMessageId(messageId || null);
+      setVoiceState("playing");
+      await audio.play();
+    } catch (error) {
+      setVoiceState("idle");
+      setActiveAudioMessageId(null);
+      console.error("Reader voice playback failed", error);
+    }
+  };
+
+  const updateMessage = (
+    messageId: string,
+    updater: (message: ChatMessage) => ChatMessage,
+  ) => {
+    setMessages((prev) =>
+      prev.map((message) =>
+        message.id === messageId ? updater(message) : message,
+      ),
+    );
+  };
+
+  const requestHindiTranslation = async (messageId: string) => {
+    const message = messages.find((item) => item.id === messageId);
+    if (!message || message.role !== "assistant") return;
+    if (message.translatedHindi) {
+      updateMessage(messageId, (current) => ({
+        ...current,
+        translatedHindi: null,
+      }));
+      return;
+    }
+
+    if (isHindiLike(message.language, message.content)) {
+      updateMessage(messageId, (current) => ({
+        ...current,
+        translatedHindi: current.content,
+      }));
+      return;
+    }
+
+    try {
+      const payload = (await apiClient.post("/api/translate", {
+        text: message.content,
+        source_language: message.language || toSpeechLanguage(language),
+        target_language: "hi-IN",
+      })) as TranslationApiResponse;
+
+      updateMessage(messageId, (current) => ({
+        ...current,
+        translatedHindi: payload.translated_text,
+      }));
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const requestSpeechForMessage = async (messageId: string) => {
+    const message = messages.find((item) => item.id === messageId);
+    if (!message || message.role !== "assistant") return;
+
+    if (activeAudioMessageId === messageId && isVoicePlaying) {
+      stopVoicePlayback();
+      return;
+    }
+
+    const speechText = message.translatedHindi || message.ttsText || message.content;
+    if (!speechText.trim()) return;
+
+    const wantsHindiAudio = Boolean(message.translatedHindi);
+    const canReuseCachedAudio =
+      Boolean(message.audioBase64) &&
+      (!wantsHindiAudio ||
+        isHindiLike(message.ttsLanguage, message.translatedHindi || message.content));
+
+    if (canReuseCachedAudio) {
+      await playAudioBase64(
+        message.audioBase64,
+        message.audioMimeType || "audio/wav",
+        messageId,
+      );
+      return;
+    }
+
+    try {
+      const payload = (await apiClient.post("/api/tts", {
+        text: speechText,
+        language:
+          message.translatedHindi
+            ? "hi-IN"
+            : message.ttsLanguage || message.language || toSpeechLanguage(language),
+        speaker: "suhani",
+      })) as SpeechSynthesisApiResponse;
+
+      updateMessage(messageId, (current) => ({
+        ...current,
+        audioBase64: payload.audio_base64,
+        audioMimeType: payload.audio_mime_type || "audio/wav",
+        ttsLanguage: payload.language,
+      }));
+
+      await playAudioBase64(
+        payload.audio_base64,
+        payload.audio_mime_type || "audio/wav",
+        messageId,
+      );
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const getVoiceHelperText = () => {
+    if (isListening) return copy.listening;
+    if (isVoiceProcessing) return copy.processing;
+    if (isVoicePlaying) return copy.playing;
+    return copy.voiceReady;
+  };
+
   useEffect(() => {
     const requestedPage =
       typeof window === "undefined"
@@ -296,6 +628,15 @@ export default function OperatorReaderPage() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    return () => {
+      mediaRecorderRef.current?.stop();
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+      voiceAbortControllerRef.current?.abort();
+      stopVoicePlayback();
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -411,6 +752,199 @@ export default function OperatorReaderPage() {
     };
   }, [conversationId, revisionId, user?.id]);
 
+  const submitVoiceQuery = async (
+    audioBlob: Blob,
+    signal?: AbortSignal,
+  ) => {
+    const formData = new FormData();
+    const mimeType = audioBlob.type || "audio/webm";
+    const fileExtension =
+      mimeType === "audio/mp4"
+        ? "mp4"
+        : mimeType === "audio/wav"
+          ? "wav"
+          : "webm";
+    formData.append("audio", audioBlob, `reader-voice.${fileExtension}`);
+    formData.append("language", "auto");
+    formData.append("speaker", "suhani");
+    formData.append("chat_scope", "reader");
+    formData.append("revision_id", revisionId);
+    if (user?.id) {
+      formData.append("user_id", user.id);
+    }
+    if (conversationId) {
+      formData.append("conversation_id", conversationId);
+    }
+
+    const response = await fetch(`${API_BASE_URL}/api/voice`, {
+      method: "POST",
+      body: formData,
+      signal,
+    });
+
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(`Voice pipeline error: ${response.status} ${detail}`);
+    }
+
+    const payload = (await response.json()) as VoiceApiResponse;
+    if (!payload.user_text?.trim() && !payload.assistant_text?.trim()) {
+      throw new Error("No voice response returned");
+    }
+    return payload;
+  };
+
+  const startVoiceRecording = async () => {
+    if (
+      !navigator.mediaDevices?.getUserMedia ||
+      typeof MediaRecorder === "undefined"
+    ) {
+      alert(copy.voiceUnsupported);
+      return;
+    }
+
+    stopVoicePlayback("idle");
+
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mimeType = getRecordingMimeType();
+    const recorder = mimeType
+      ? new MediaRecorder(stream, { mimeType })
+      : new MediaRecorder(stream);
+
+    audioChunksRef.current = [];
+    mediaStreamRef.current = stream;
+    mediaRecorderRef.current = recorder;
+
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        audioChunksRef.current.push(event.data);
+      }
+    };
+
+    recorder.onstart = () => {
+      setVoiceState("recording");
+    };
+
+    recorder.onstop = async () => {
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
+
+      const audioBlob = new Blob(audioChunksRef.current, {
+        type: recorder.mimeType || "audio/webm",
+      });
+      audioChunksRef.current = [];
+      if (!audioBlob.size) {
+        setVoiceState("idle");
+        return;
+      }
+
+      setVoiceState("processing");
+      setIsQuerying(true);
+      voiceAbortControllerRef.current = new AbortController();
+      try {
+        const voiceResponse = await submitVoiceQuery(
+          audioBlob,
+          voiceAbortControllerRef.current.signal,
+        );
+        const citations = (voiceResponse.citations || []).map(mapCitationPayload);
+        const nextConversationId =
+          voiceResponse.conversation_id || conversationId || null;
+
+        setMessages((prev) => {
+          const next = [...prev];
+          if (voiceResponse.user_text?.trim()) {
+            next.push({
+              id: createLocalMessageId("voice-user"),
+              role: "user",
+              content: voiceResponse.user_text,
+              citations: [],
+              language:
+                voiceResponse.detected_language || toSpeechLanguage(language),
+            });
+          }
+          next.push({
+            id: createLocalMessageId("voice-assistant"),
+            role: "assistant",
+            content: voiceResponse.assistant_text || copy.voiceError,
+            citations,
+            language:
+              voiceResponse.detected_language || toSpeechLanguage(language),
+            ttsText:
+              voiceResponse.assistant_tts_text || voiceResponse.assistant_text,
+            audioBase64: voiceResponse.audio_base64,
+            audioMimeType: voiceResponse.audio_mime_type,
+            ttsLanguage: voiceResponse.tts_language,
+          });
+          return next;
+        });
+
+        if (nextConversationId) {
+          setConversationId(nextConversationId);
+          if (nextConversationId !== conversationId) {
+            const next = new URLSearchParams(searchParams.toString());
+            next.set("page", String(pageNumber));
+            next.set("conversation_id", nextConversationId);
+            router.replace(`/operator/reader/${revisionId}?${next.toString()}`);
+          }
+        }
+
+        if (citations.length > 0) {
+          jumpToCitation(citations[0]);
+        }
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+          setVoiceState("idle");
+          return;
+        }
+
+        console.error(error);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: createLocalMessageId("voice-error"),
+            role: "assistant",
+            content: copy.voiceError,
+            citations: [],
+            language: toSpeechLanguage(language),
+          },
+        ]);
+        setVoiceState("idle");
+      } finally {
+        voiceAbortControllerRef.current = null;
+        setIsQuerying(false);
+        setVoiceState((current) =>
+          current === "processing" ? "idle" : current,
+        );
+      }
+    };
+
+    recorder.start();
+  };
+
+  const handleVoiceInput = async () => {
+    if (isListening) {
+      mediaRecorderRef.current?.stop();
+      return;
+    }
+
+    if (isVoiceProcessing) {
+      voiceAbortControllerRef.current?.abort();
+      return;
+    }
+
+    if (isVoicePlaying) {
+      stopVoicePlayback();
+      return;
+    }
+
+    try {
+      await startVoiceRecording();
+    } catch (error) {
+      setVoiceState("idle");
+      console.error(error);
+    }
+  };
+
   const submitQuestion = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const currentQuestion = question.trim();
@@ -426,10 +960,11 @@ export default function OperatorReaderPage() {
     setMessages((prev) => [
       ...prev,
       {
-        id: `${Date.now()}-user`,
+        id: createLocalMessageId("user"),
         role: "user",
         content: currentQuestion,
         citations: [],
+        language: toQueryLanguage(language),
       },
     ]);
     setQuestion("");
@@ -438,7 +973,7 @@ export default function OperatorReaderPage() {
     try {
       const response = (await apiClient.post("/api/query", {
         query: currentQuestion,
-        language: language === "ENG" ? "en" : "hi",
+        language: toQueryLanguage(language),
         role: "operator",
         user_id: user?.id,
         conversation_id: conversationId,
@@ -451,10 +986,12 @@ export default function OperatorReaderPage() {
       setMessages((prev) => [
         ...prev,
         {
-          id: `${Date.now()}-assistant`,
+          id: createLocalMessageId("assistant"),
           role: "assistant",
           content: response.answer,
           citations,
+          language: toQueryLanguage(language),
+          ttsText: response.answer,
         },
       ]);
 
@@ -474,10 +1011,11 @@ export default function OperatorReaderPage() {
       setMessages((prev) => [
         ...prev,
         {
-          id: `${Date.now()}-assistant-error`,
+          id: createLocalMessageId("assistant-error"),
           role: "assistant",
           content: copy.queryError,
           citations: [],
+          language: toSpeechLanguage(language),
         },
       ]);
     } finally {
@@ -487,7 +1025,7 @@ export default function OperatorReaderPage() {
 
   const headingCode = documentMeta?.code || fallbackCode;
   const headingTitle = documentMeta?.title || fallbackTitle;
-  const revisionLabel = documentMeta?.revision || "Current";
+  const revisionLabel = documentMeta?.revision || copy.currentRevision;
 
   return (
     <OperatorLayout>
@@ -504,7 +1042,7 @@ export default function OperatorReaderPage() {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="info" size="sm">
-                Page {pageNumber}
+                {copy.pageLabel} {pageNumber}
                 {totalPages > 0 ? ` / ${totalPages}` : ""}
               </Badge>
               {activeCitation ? (
@@ -537,7 +1075,7 @@ export default function OperatorReaderPage() {
               onClick={() => goToPage(pageNumber - 1)}
               disabled={pageNumber <= 1 || isPageLoading}
             >
-              Prev Page
+              {copy.prevPage}
             </Button>
             <Button
               variant="secondary"
@@ -547,7 +1085,7 @@ export default function OperatorReaderPage() {
                 isPageLoading || (totalPages > 0 && pageNumber >= totalPages)
               }
             >
-              Next Page
+              {copy.nextPage}
             </Button>
             <form
               onSubmit={(event) => {
@@ -561,10 +1099,10 @@ export default function OperatorReaderPage() {
                 onChange={(event) => setPageInput(event.target.value)}
                 className="w-20 rounded-[8px] border border-border bg-white px-2 py-1 text-sm text-foreground outline-none focus:border-primary"
                 inputMode="numeric"
-                aria-label="Jump to page"
+                aria-label={copy.jumpToPage}
               />
               <Button variant="outline" size="sm" type="submit">
-                Go
+                {copy.goLabel}
               </Button>
             </form>
           </div>
@@ -615,17 +1153,35 @@ export default function OperatorReaderPage() {
               <h2 className="text-sm font-semibold text-foreground">
                 {copy.chatPanelTitle}
               </h2>
-              {conversationId ? (
-                <Badge variant="success" size="sm">
-                  Conversation Live
-                </Badge>
-              ) : null}
+              <div className="flex items-center gap-2">
+                <div className="inline-flex items-center rounded-full border border-border bg-[#f5f8fc] p-1">
+                  {(["ENG", "HIN", "HING"] as AppLanguage[]).map((lang) => (
+                    <button
+                      key={lang}
+                      type="button"
+                      onClick={() => setLanguage(lang)}
+                      className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.1em] ${
+                        language === lang
+                          ? "bg-primary text-white"
+                          : "text-muted hover:text-foreground"
+                      }`}
+                    >
+                      {lang}
+                    </button>
+                  ))}
+                </div>
+                {conversationId ? (
+                  <Badge variant="success" size="sm">
+                    {copy.conversationLive}
+                  </Badge>
+                ) : null}
+              </div>
             </div>
 
             <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
               {messages.length === 0 ? (
                 <div className="rounded-[12px] border border-border bg-white p-3 text-sm text-muted">
-                  Ask naturally. Answers are grounded to this selected document.
+                  {copy.emptyChatHint}
                 </div>
               ) : null}
 
@@ -641,9 +1197,58 @@ export default function OperatorReaderPage() {
                         : "border-border bg-white text-foreground"
                     }`}
                   >
+                    {message.role === "assistant" ? (
+                      <div className="mb-2 flex items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => void requestHindiTranslation(message.id)}
+                          className="inline-flex items-center gap-1 rounded-full border border-[#d8dfec] bg-[#f6f8ff] px-2.5 py-1 text-[11px] font-semibold text-[#2947b2] transition-colors hover:border-[#a9b8e4] hover:bg-white"
+                          title={
+                            message.translatedHindi
+                              ? copy.hideHindi
+                              : copy.translateHindi
+                          }
+                        >
+                          <TranslateSparkIcon className="h-3.5 w-3.5" />
+                          <span>Hindi</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void requestSpeechForMessage(message.id)}
+                          className={`inline-flex h-8 w-8 items-center justify-center rounded-full border transition-colors ${
+                            activeAudioMessageId === message.id &&
+                            isVoicePlaying
+                              ? "border-secondary bg-secondary text-white"
+                              : "border-[#d8dfec] bg-[#f6f8ff] text-[#2947b2] hover:border-[#a9b8e4] hover:bg-white"
+                          }`}
+                          title={
+                            activeAudioMessageId === message.id && isVoicePlaying
+                              ? copy.stopAudio
+                              : copy.speakAnswer
+                          }
+                        >
+                          {activeAudioMessageId === message.id &&
+                          isVoicePlaying ? (
+                            <StopSquareIcon className="h-3.5 w-3.5" />
+                          ) : (
+                            <SpeakerWaveIcon className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                      </div>
+                    ) : null}
                     <p className="whitespace-pre-wrap text-sm leading-relaxed">
                       {message.content}
                     </p>
+                    {message.translatedHindi ? (
+                      <div className="mt-3 rounded-[10px] border border-[#d7def0] bg-[#f7faff] px-3 py-2.5">
+                        <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#2947b2]">
+                          {copy.hindiTranslation}
+                        </p>
+                        <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                          {message.translatedHindi}
+                        </p>
+                      </div>
+                    ) : null}
                     {message.role === "assistant" && message.citations.length ? (
                       <div className="mt-2 border-t border-border/60 pt-2">
                         <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
@@ -669,7 +1274,7 @@ export default function OperatorReaderPage() {
               {isQuerying ? (
                 <div className="flex justify-start">
                   <div className="rounded-[10px] border border-border bg-white px-3 py-2 text-xs text-muted">
-                    Generating response...
+                    {isVoiceProcessing ? copy.processing : copy.generating}
                   </div>
                 </div>
               ) : null}
@@ -687,6 +1292,27 @@ export default function OperatorReaderPage() {
                   placeholder={copy.askPlaceholder}
                   className="flex-1 rounded-[10px] border border-border bg-white px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted focus:border-primary"
                 />
+                <button
+                  type="button"
+                  onClick={handleVoiceInput}
+                  disabled={isQuerying && !isVoiceProcessing}
+                  title={getVoiceHelperText()}
+                  className={`inline-flex items-center justify-center rounded-[10px] border px-3 ${
+                    isListening
+                      ? "border-danger bg-danger text-white"
+                      : isVoiceProcessing
+                        ? "border-[#ffd329] bg-[#ffd329] text-[#232323]"
+                        : isVoicePlaying
+                          ? "border-secondary bg-secondary text-white"
+                          : "border-border bg-white text-muted hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
+                  }`}
+                >
+                  {isVoicePlaying ? (
+                    <StopSquareIcon className="h-4 w-4" />
+                  ) : (
+                    <MicPulseIcon className="h-4 w-4" />
+                  )}
+                </button>
                 <Button
                   variant="primary"
                   type="submit"
@@ -695,6 +1321,19 @@ export default function OperatorReaderPage() {
                   {copy.askButton}
                 </Button>
               </div>
+              <p
+                className={`mt-2 text-xs font-medium ${
+                  isListening
+                    ? "text-danger"
+                    : isVoiceProcessing
+                      ? "text-[#8a6d00]"
+                      : isVoicePlaying
+                        ? "text-secondary"
+                        : "text-muted"
+                }`}
+              >
+                {getVoiceHelperText()}
+              </p>
             </form>
           </section>
         </div>
