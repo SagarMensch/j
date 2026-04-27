@@ -1,0 +1,183 @@
+﻿Diagnose log at 2026-04-01T03:36:33Z
+
+AppPath: C:\Program Files\Git\mingw64\bin\git-credential-manager.exe
+InstallDir: C:\Program Files\Git\mingw64\bin\
+Version: 2.6.1+786ab03440ddc82e807a97c0e540f5247e44cec6
+
+------------
+Diagnostic: Environment
+Skipped: False
+Success: True
+Exception: None
+Log:
+OSType: Windows
+OSVersion: 10.0 (build 26200)
+Reading environment variables... OK
+ Variables:
+HOMEPATH=\Users\sagar
+DriverData=C:\Windows\System32\Drivers\DriverData
+COMPUTERNAME=SAGAR
+MSYSTEM=MINGW64
+CommonProgramFiles(x86)=C:\Program Files (x86)\Common Files
+OneDrive=C:\Users\sagar\OneDrive - SequelString AI Private Limited
+CODEX_THREAD_ID=019d453a-e98e-7d51-973a-023ce91e3a9d
+EFC_1788_2283032206=1
+EFC_1788_2775293581=1
+TMP=C:\Users\sagar\AppData\Local\Temp
+LC_CTYPE=C.UTF-8
+RTOOLS42_HOME=C:\rtools42
+PATHEXT=.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC;.PY;.PYW;.CPL
+EFC_1788_3789132940=1
+SystemDrive=C:
+GIT_EXEC_PATH=C:/Program Files/Git/mingw64/libexec/git-core
+TEMP=C:\Users\sagar\AppData\Local\Temp
+LOCALAPPDATA=C:\Users\sagar\AppData\Local
+EFC_1788_1262719628=1
+SESSIONNAME=Console
+PROCESSOR_IDENTIFIER=Intel64 Family 6 Model 154 Stepping 4, GenuineIntel
+Classpath=C:\LINGO11\Lingo11_0.jar
+ProgramData=C:\ProgramData
+USERDOMAIN=SAGAR
+PROCESSOR_REVISION=9a04
+EFC_1788_1592913036=1
+PROCESSOR_LEVEL=6
+NUMBER_OF_PROCESSORS=12
+TMPDIR=C:\Users\sagar\AppData\Local\Temp
+ZED_ENVIRONMENT=worktree-shell
+ProgramFiles(x86)=C:\Program Files (x86)
+PUBLIC=C:\Users\Public
+FPS_BROWSER_USER_PROFILE_STRING=Default
+CommonProgramFiles=C:\Program Files (x86)\Common Files
+IGCCSVC_DB=AQAAANCMnd8BFdERjHoAwE/Cl+sBAAAAJk+BYksN2USo23fvCc+kCwQAAAACAAAAAAAQZgAAAAEAACAAAADVTAzBBgy0IpQLsXjqtHh1V7kchTcgdPnFPe6/zSJ6fwAAAAAOgAAAAAIAACAAAACbdLOS+2dFiCNnAm2rLeXxYa2f6LCjBRE/T63Eoy1QjWAAAAAmWiETuP+Hsk82uHZ3E9D+AcAG7ptavbIVw/RVP08FlG8zhPtMuo27QWZNanjtIXYbT3TwG0571rKwWRilj6wlDD56BNm09bfojaRotM+UDEyClbeU2/IqUG1zyOtqieZAAAAAepIjPDu9lTF5pl4mNRMKiawDYLNeqPm+UJ5k/zML4Y8KCFyakW24vVNPkQ+t2RFG7tk5v1A+/S71AXU614Zmeg==
+ProgramFiles=C:\Program Files (x86)
+PLINK_PROTOCOL=ssh
+COLORTERM=truecolor
+LINGO_11_LICENSE_FILE=C:\LINGO11\lndlng11.lic
+ChocolateyInstall=C:\ProgramData\chocolatey
+GIT_TRACE2_PARENT_SID=9861e16a-7d19-4d5b-92f8-7fd52a242915
+ProgramW6432=C:\Program Files
+HOME=C:\Users\sagar
+SystemRoot=C:\WINDOWS
+CommonProgramW6432=C:\Program Files\Common Files
+ZES_ENABLE_SYSMAN=1
+LOGONSERVER=\\SAGAR
+USERPROFILE=C:\Users\sagar
+ALM_HHWU=True
+USERDOMAIN_ROAMINGPROFILE=SAGAR
+TERM=xterm-256color
+APPDATA=C:\Users\sagar\AppData\Roaming
+HOMEDRIVE=C:
+OneDriveCommercial=C:\Users\sagar\OneDrive - SequelString AI Private Limited
+PSModulePath=C:\Users\sagar\OneDrive\Documents\WindowsPowerShell\Modules;C:\Program Files\WindowsPowerShell\Modules;C:\WINDOWS\system32\WindowsPowerShell\v1.0\Modules
+USERNAME=sagar
+PROCESSOR_ARCHITEW6432=AMD64
+FPS_BROWSER_APP_PROFILE_STRING=Internet Explorer
+PROCESSOR_ARCHITECTURE=x86
+OS=Windows_NT
+ComSpec=C:\WINDOWS\system32\cmd.exe
+ChocolateyLastPathUpdate=133753914800539622
+Path=C:/Program Files/Git/mingw64/libexec/git-core;C:\Program Files\Git\mingw64\bin;C:\Program Files\Git\usr\bin;C:\Users\sagar\bin;C:\Users\sagar\.codex\tmp\arg0\codex-arg0lYeakA;C:\Python314\Scripts\;C:\Python314\;C:\Python313\Scripts\;C:\Python313\;C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:\WINDOWS\System32\WindowsPowerShell\v1.0\;C:\WINDOWS\System32\OpenSSH\;C:\Program Files\dotnet\;C:\ProgramData\chocolatey\bin;C:\LINGO11\;C:\Program Files\Microsoft SQL Server\150\Tools\Binn\;C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\;C:\Program Files\Git\cmd;C:\Program Files\Wolfram Research\WolframScript\;C:\Program Files\Tesseract-OCR;C:\Program Files\D2\;C:\Program Files\nodejs\;C:\Program Files\gs\gs10.06.0\bin;C:\Users\sagar\scoop\shims;C:\Users\sagar\.local\bin;C:\Program Files\MySQL\MySQL Shell 8.0\bin\;C:\Users\sagar\AppData\Local\Microsoft\WindowsApps;C:\Users\sagar\AppData\Local\Programs\Microsoft VS Code\bin;C:\Users\sagar\AppData\Local\Programs\Ollama;C:\Users\sagar\AppData\Local\Programs\MiKTeX\miktex\bin\x64\;C:\Users\sagar\AppData\Local\Pandoc\;C:\Users\sagar\.dotnet\tools;C:\Users\sagar\bin;C:\Users\sagar\bin;C:\Users\sagar\AppData\Local\Microsoft\WinGet\Packages\oschwartz10612.Poppler_Microsoft.Winget.Source_8wekyb3d8bbwe\poppler-25.07.0/Library/bin;C:\Users\sagar\AppData\Local\Microsoft\WinGet\Links;C:\Users\sagar\AppData\Local\Programs\Antigravity\bin;C:\Users\sagar\AppData\Roaming\npm;C:\Users\sagar\AppData\Local\Programs\cursor\resources\app\bin;C:\Users\sagar\AppData\Local\Programs\Zed\bin
+windir=C:\WINDOWS
+OLLAMA_MODELS=C:\Ollama\Models
+ALLUSERSPROFILE=C:\ProgramData
+
+
+------------
+Diagnostic: File system
+Skipped: False
+Success: True
+Exception: None
+Log:
+Temporary directory is 'C:\Users\sagar\AppData\Local\Temp\'...
+Checking basic file I/O...
+Writing to temporary file 'C:\Users\sagar\AppData\Local\Temp\21df494aab947a760b22e29c'... OK
+Reading from temporary file 'C:\Users\sagar\AppData\Local\Temp\21df494aab947a760b22e29c'... OK
+Deleting temporary file 'C:\Users\sagar\AppData\Local\Temp\21df494aab947a760b22e29c'... OK
+Testing IFileSystem instance...
+UserHomePath: C:\Users\sagar
+UserDataDirectoryPath: C:\Users\sagar\.gcm
+GetCurrentDirectory(): C:\Users\sagar\Downloads\Ingreia
+
+------------
+Diagnostic: Networking
+Skipped: False
+Success: True
+Exception: None
+Log:
+Checking networking and HTTP stack...
+Creating HTTP client... OK
+IsNetworkAvailable: True
+Sending HEAD request to http://example.com...Sending HEAD request to https://example.com... OK
+ OK
+Acquiring free TCP port... OK
+Testing local HTTP loopback connections...
+Creating new HTTP listener for http://localhost:59121/... OK
+Waiting for loopback connection... OK
+Writing response... OK
+Waiting for response data... OK
+Loopback connection data OK
+
+------------
+Diagnostic: Git
+Skipped: False
+Success: True
+Exception: None
+Log:
+Getting Git version... OK
+Git version is '2.50.0.windows.1'
+Locating current repository...Not inside a Git repository.
+ OK
+Listing all Git configuration... OK
+Git configuration:
+file:C:/Program Files/Git/etc/gitconfig	diff.astextplain.textconv=astextplain
+file:C:/Program Files/Git/etc/gitconfig	filter.lfs.clean=git-lfs clean -- %f
+file:C:/Program Files/Git/etc/gitconfig	filter.lfs.smudge=git-lfs smudge -- %f
+file:C:/Program Files/Git/etc/gitconfig	filter.lfs.process=git-lfs filter-process
+file:C:/Program Files/Git/etc/gitconfig	filter.lfs.required=true
+file:C:/Program Files/Git/etc/gitconfig	http.sslbackend=schannel
+file:C:/Program Files/Git/etc/gitconfig	core.autocrlf=true
+file:C:/Program Files/Git/etc/gitconfig	core.fscache=true
+file:C:/Program Files/Git/etc/gitconfig	core.symlinks=true
+file:C:/Program Files/Git/etc/gitconfig	pull.rebase=false
+file:C:/Program Files/Git/etc/gitconfig	credential.helper=manager
+file:C:/Program Files/Git/etc/gitconfig	credential.https://dev.azure.com.usehttppath=true
+file:C:/Program Files/Git/etc/gitconfig	init.defaultbranch=master
+file:C:/Users/sagar/.gitconfig	user.name=SagarMensch
+file:C:/Users/sagar/.gitconfig	user.email=sagarsharmawork22@gmail.com
+
+
+------------
+Diagnostic: Credential storage
+Skipped: False
+Success: True
+Exception: None
+Log:
+ICredentialStore instance is of type: CredentialStore
+Writing test credential... OK
+Reading test credential... OK
+Deleting test credential... OK
+
+------------
+Diagnostic: Microsoft authentication (AAD/MSA)
+Skipped: False
+Success: True
+Exception: None
+Log:
+Broker is not enabled.
+Flow type is: Auto
+Gathering MSAL token cache data... OK
+CacheDirectory: C:\Users\sagar\AppData\Local\.IdentityService
+CacheFileName: msal.cache
+CacheFilePath: C:\Users\sagar\AppData\Local\.IdentityService\msal.cache
+Creating cache helper... OK
+Verifying MSAL token cache persistence... OK
+
+------------
+Diagnostic: GitHub API
+Skipped: False
+Success: True
+Exception: None
+Log:
+Using 'https://github.com/' as API target.
+Querying '/meta' endpoint... OK
+

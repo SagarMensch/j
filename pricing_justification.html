@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Jubilant Ingrevia Pricing Justification</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet"
+  />
+  <style>
+    :root {
+      --bg: #ffffff;
+      --text: #0a0a0a;
+      --muted: #4a4a4a;
+      --line: #d9e1ea;
+      --panel: #f7f9fc;
+      --ibm-blue: #0f62fe;
+      --robinhood-green: #00c805;
+      --solid-yellow: #ffc107;
+      --shadow: 0 10px 30px rgba(15, 98, 254, 0.06);
+      --radius: 18px;
+      --content-width: 1120px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Figtree", sans-serif;
+      line-height: 1.5;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .page {
+      width: min(100%, var(--content-width));
+      margin: 0 auto;
+      padding: 32px 28px 56px;
+    }
+
+    header {
+      border-bottom: 2px solid var(--line);
+      padding-bottom: 22px;
+      margin-bottom: 28px;
+      break-inside: avoid-page;
+      page-break-inside: avoid;
+    }
+
+    .brand-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 18px;
+    }
+
+    .brand-lockup {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      min-width: 0;
+    }
+
+    .brand-lockup img {
+      width: 78px;
+      height: auto;
+      object-fit: contain;
+      flex: 0 0 auto;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 36px;
+      height: 4px;
+      border-radius: 999px;
+      background: linear-gradient(
+        90deg,
+        var(--ibm-blue) 0 42%,
+        var(--robinhood-green) 42% 72%,
+        var(--solid-yellow) 72% 100%
+      );
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      color: var(--text);
+    }
+
+    h1 {
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: 1.08;
+      letter-spacing: -0.04em;
+      font-weight: 800;
+      max-width: 780px;
+    }
+
+    .subhead {
+      margin-top: 12px;
+      max-width: 820px;
+      font-size: 1rem;
+      color: var(--muted);
+    }
+
+    .header-meta {
+      min-width: 250px;
+      max-width: 320px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 18px 18px 16px;
+      background:
+        linear-gradient(180deg, rgba(15, 98, 254, 0.04), rgba(15, 98, 254, 0)),
+        var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .meta-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .meta-value {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 12px;
+    }
+
+    .summary-grid,
+    .two-col-grid,
+    .three-col-grid {
+      display: grid;
+      gap: 16px;
+      margin-bottom: 26px;
+    }
+
+    .summary-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .two-col-grid {
+      grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.95fr);
+    }
+
+    .three-col-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .card,
+    .section,
+    .table-card,
+    .note,
+    .pricing-band {
+      break-inside: avoid-page;
+      page-break-inside: avoid;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg);
+      box-shadow: var(--shadow);
+      padding: 20px;
+    }
+
+    .summary-card {
+      position: relative;
+      overflow: hidden;
+      min-height: 158px;
+    }
+
+    .summary-card::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto auto 0;
+      width: 100%;
+      height: 6px;
+      background: var(--ibm-blue);
+    }
+
+    .summary-card.green::before {
+      background: var(--robinhood-green);
+    }
+
+    .summary-card.yellow::before {
+      background: var(--solid-yellow);
+    }
+
+    .summary-label {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+
+    .summary-value {
+      font-size: 2rem;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      margin-bottom: 8px;
+    }
+
+    .summary-note {
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .section {
+      margin-bottom: 24px;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: linear-gradient(180deg, rgba(15, 98, 254, 0.02), rgba(15, 98, 254, 0));
+      padding: 24px;
+    }
+
+    .section h2 {
+      font-size: 1.45rem;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
+
+    .section-intro {
+      margin: 0 0 18px;
+      color: var(--muted);
+      max-width: 880px;
+    }
+
+    .pricing-band {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 14px;
+    }
+
+    .band-item {
+      border-radius: 16px;
+      padding: 18px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+    }
+
+    .band-item.blue {
+      background: rgba(15, 98, 254, 0.07);
+      border-color: rgba(15, 98, 254, 0.18);
+    }
+
+    .band-item.green {
+      background: rgba(0, 200, 5, 0.08);
+      border-color: rgba(0, 200, 5, 0.18);
+    }
+
+    .band-item.yellow {
+      background: rgba(255, 193, 7, 0.14);
+      border-color: rgba(255, 193, 7, 0.3);
+    }
+
+    .band-item .title {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    .band-item .value {
+      font-size: 1.55rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      margin-bottom: 6px;
+    }
+
+    .band-item .copy {
+      font-size: 0.95rem;
+      color: var(--muted);
+    }
+
+    ul {
+      margin: 10px 0 0;
+      padding-left: 18px;
+    }
+
+    li + li {
+      margin-top: 8px;
+    }
+
+    .table-card {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      overflow: hidden;
+      background: var(--bg);
+      box-shadow: var(--shadow);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    thead {
+      background: #f3f7ff;
+    }
+
+    th,
+    td {
+      text-align: left;
+      vertical-align: top;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      font-size: 0.95rem;
+    }
+
+    th {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: var(--muted);
+    }
+
+    tbody tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .amount {
+      white-space: nowrap;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .note {
+      border-left: 5px solid var(--ibm-blue);
+      background: #f7faff;
+      border-radius: 14px;
+      padding: 16px 18px;
+      color: var(--text);
+      margin-top: 16px;
+    }
+
+    .note.green {
+      border-left-color: var(--robinhood-green);
+      background: #f7fff8;
+    }
+
+    .note.yellow {
+      border-left-color: var(--solid-yellow);
+      background: #fffaf0;
+    }
+
+    .kicker {
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--text);
+      background: rgba(15, 98, 254, 0.09);
+      border: 1px solid rgba(15, 98, 254, 0.15);
+      margin-bottom: 12px;
+    }
+
+    .footer {
+      margin-top: 28px;
+      border-top: 2px solid var(--line);
+      padding-top: 16px;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      color: var(--muted);
+      font-size: 0.88rem;
+      break-inside: avoid-page;
+      page-break-inside: avoid;
+    }
+
+    @media (max-width: 920px) {
+      .brand-row,
+      .two-col-grid,
+      .summary-grid,
+      .three-col-grid,
+      .pricing-band,
+      .footer {
+        grid-template-columns: 1fr;
+        flex-direction: column;
+      }
+
+      .header-meta {
+        max-width: none;
+      }
+    }
+
+    @media print {
+      @page {
+        size: A4;
+        margin: 16mm 12mm 14mm;
+      }
+
+      body {
+        background: #fff;
+      }
+
+      .page {
+        width: 100%;
+        max-width: none;
+        padding: 0;
+      }
+
+      header,
+      .section,
+      .card,
+      .table-card,
+      .note,
+      .footer,
+      .pricing-band,
+      .summary-card,
+      .band-item {
+        break-inside: avoid-page;
+        page-break-inside: avoid;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <div class="brand-row">
+        <div class="brand-lockup">
+          <img src="./jubilantingrevia_logo-removebg-preview.png" alt="Jubilant Ingrevia" />
+          <div>
+            <div class="eyebrow">Pricing Justification</div>
+            <h1>Commercial rationale for Jubilant Ingrevia Plant Assistant deployment</h1>
+            <p class="subhead">
+              This document translates the pricing workbook into a client-safe commercial narrative.
+              It is designed for smooth leadership and procurement discussions, without exposing the
+              underlying provider stack.
+            </p>
+          </div>
+        </div>
+        <aside class="header-meta">
+          <div class="meta-label">Prepared For</div>
+          <div class="meta-value">Commercial and deployment discussion</div>
+          <div class="meta-label">Commercial Structure</div>
+          <div class="meta-value">One-time setup + annual licensing + usage + support</div>
+          <div class="meta-label">Prepared On</div>
+          <div class="meta-value">1 April 2026</div>
+        </aside>
+      </div>
+    </header>
+
+    <section class="summary-grid">
+      <article class="card summary-card">
+        <div class="summary-label">One-Time Setup</div>
+        <div class="summary-value">Rs 24,00,000</div>
+        <div class="summary-note">
+          Platform setup, ingestion pipeline, access control, integration layer, rollout support, and handholding.
+        </div>
+      </article>
+      <article class="card summary-card green">
+        <div class="summary-label">Year 1 Commercial</div>
+        <div class="summary-value">Rs 51,24,000</div>
+        <div class="summary-note">
+          Setup plus annual user licensing and query bundle reference. Presented excluding cloud pass-through reference.
+        </div>
+      </article>
+      <article class="card summary-card yellow">
+        <div class="summary-label">Year 2+ Commercial</div>
+        <div class="summary-value">Rs 29,64,000</div>
+        <div class="summary-note">
+          Annual licensing, annual query usage reference, and AMC at 10 percent of setup.
+        </div>
+      </article>
+    </section>
+
+    <section class="section">
+      <span class="kicker">Executive Positioning</span>
+      <h2>How this pricing should be framed in the room</h2>
+      <p class="section-intro">
+        The proposal should be positioned as a governed operational intelligence platform, not as a
+        generic chatbot subscription. The pricing is justified by the delivery model: plant-specific
+        deployment, role-based governance, multilingual readiness, document-grounded responses,
+        training workflows, and production support.
+      </p>
+      <div class="pricing-band">
+        <div class="band-item blue">
+          <div class="title">What client is paying for</div>
+          <div class="value">Operational reliability</div>
+          <div class="copy">
+            Controlled rollout, governed access, structured document ingestion, and enterprise support.
+          </div>
+        </div>
+        <div class="band-item green">
+          <div class="title">What should be emphasized</div>
+          <div class="value">Adoption and risk reduction</div>
+          <div class="copy">
+            Faster SOP access, reduced search time, cleaner auditability, and smoother multi-plant standardization.
+          </div>
+        </div>
+        <div class="band-item yellow">
+          <div class="title">What should be avoided</div>
+          <div class="value">Provider-level details</div>
+          <div class="copy">
+            Do not anchor the conversation on model vendors, vector tools, or low-level infrastructure names.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="two-col-grid">
+      <article class="section">
+        <span class="kicker">Commercial Summary</span>
+        <h2>Audited pricing structure</h2>
+        <p class="section-intro">
+          The figures below reflect the audited logic from the workbook after aligning the setup and
+          recurring-cost logic correctly.
+        </p>
+        <div class="table-card">
+          <table>
+            <thead>
+              <tr>
+                <th>Commercial Line</th>
+                <th>Value</th>
+                <th>Justification</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>One-time setup</td>
+                <td class="amount">Rs 24,00,000</td>
+                <td>Foundational rollout cost for platform setup, ingestion pipeline, integration, training, and go-live support.</td>
+              </tr>
+              <tr>
+                <td>Annual user licensing</td>
+                <td class="amount">Rs 25,80,000</td>
+                <td>100 total named users across 50 plants, split across admin and standard access profiles.</td>
+              </tr>
+              <tr>
+                <td>Annual query reference</td>
+                <td class="amount">Rs 1,44,000</td>
+                <td>Based on the selected standard monthly query bundle at Rs 12,000 per month.</td>
+              </tr>
+              <tr>
+                <td>Annual AMC and support</td>
+                <td class="amount">Rs 2,40,000</td>
+                <td>Calculated at 10 percent of one-time setup for recurring stabilization and maintenance.</td>
+              </tr>
+              <tr>
+                <td>Cloud infrastructure reference</td>
+                <td class="amount">Rs 19,33,684</td>
+                <td>Reference operating baseline for an India-region production deployment with HA and managed controls.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="note yellow">
+          The cloud line should be treated as a reference operating baseline. In the commercial discussion,
+          keep it clearly separated from the core product pricing unless the client asks for bundled managed hosting.
+        </div>
+      </article>
+
+      <article class="section">
+        <span class="kicker">Why this holds</span>
+        <h2>Core pricing defense</h2>
+        <ul>
+          <li>The setup fee is justified because the product is not being sold as a generic SaaS seat; it is being rolled out as a tailored multi-plant operating system.</li>
+          <li>The licensing fee is defensible because it includes governed access, auditability, document controls, and platform support, not just chat access.</li>
+          <li>The query pricing is usage-linked and therefore more transparent than opaque unlimited plans that become difficult to defend later.</li>
+          <li>The recurring support structure is moderate and commercially clean at 10 percent of setup, which procurement usually finds easier to accept.</li>
+          <li>The architecture remains portable, which supports the no-lock-in narrative during long-term commercial negotiation.</li>
+        </ul>
+        <div class="note green">
+          Recommended commercial line: this is priced as a governed plant-assistant platform with deployment accountability,
+          not as raw model consumption resale.
+        </div>
+      </article>
+    </section>
+
+    <section class="section">
+      <span class="kicker">One-Time Setup</span>
+      <h2>Setup pricing justification in detail</h2>
+      <div class="table-card">
+        <table>
+          <thead>
+            <tr>
+              <th>Component</th>
+              <th>Amount</th>
+              <th>Commercial rationale</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Platform deployment</td>
+              <td class="amount">Rs 3,50,000</td>
+              <td>Multi-tenant rollout across 50 isolated plant workspaces with secure deployment, scaling, and access control foundations.</td>
+            </tr>
+            <tr>
+              <td>Document ingestion and vectorization</td>
+              <td class="amount">Rs 4,50,000</td>
+              <td>1,000 documents and approximately 20,000 pages require extraction, chunking, metadata indexing, retrieval setup, and quality control.</td>
+            </tr>
+            <tr>
+              <td>Role-based access control</td>
+              <td class="amount">Rs 2,00,000</td>
+              <td>Admin and standard-user control structure across plants with auditability and isolation discipline.</td>
+            </tr>
+            <tr>
+              <td>Plant-wise configuration</td>
+              <td class="amount">Rs 2,50,000</td>
+              <td>Per-plant setup overhead for branded workspaces, isolated data contexts, and workflow adjustments.</td>
+            </tr>
+            <tr>
+              <td>Integration layer</td>
+              <td class="amount">Rs 2,50,000</td>
+              <td>Enterprise endpoint connectivity, identity integration, ERP connectivity, webhook handling, and API governance.</td>
+            </tr>
+            <tr>
+              <td>Security and compliance</td>
+              <td class="amount">Rs 1,50,000</td>
+              <td>Encryption posture, audit logging, vulnerability checks, and enterprise deployment controls.</td>
+            </tr>
+            <tr>
+              <td>Testing and QA</td>
+              <td class="amount">Rs 1,50,000</td>
+              <td>Functional validation, load checks, regression cycles, and production readiness testing.</td>
+            </tr>
+            <tr>
+              <td>Cloud setup and configuration</td>
+              <td class="amount">Rs 2,00,000</td>
+              <td>Network segmentation, access policy setup, infrastructure templates, and environment readiness.</td>
+            </tr>
+            <tr>
+              <td>Admin training</td>
+              <td class="amount">Rs 1,50,000</td>
+              <td>Structured training for plant admins across batches so rollout ownership remains with the client team post go-live.</td>
+            </tr>
+            <tr>
+              <td>User documentation</td>
+              <td class="amount">Rs 1,00,000</td>
+              <td>Operational manuals, admin guides, workflow help material, and adoption-support content.</td>
+            </tr>
+            <tr>
+              <td>Go-live support</td>
+              <td class="amount">Rs 1,50,000</td>
+              <td>Two-week stabilization window with technical and support coverage during first production use.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="three-col-grid">
+      <article class="section">
+        <span class="kicker">Licensing</span>
+        <h2>Named user model</h2>
+        <p class="section-intro">
+          The licensing structure is intentionally named-user based rather than concurrent-user based,
+          because plant operations require accountability, audit traceability, and personal activity history.
+        </p>
+        <ul>
+          <li>Admin user annual fee: <strong>Rs 30,000</strong></li>
+          <li>Standard user annual fee: <strong>Rs 21,600</strong></li>
+          <li>Total user count basis: <strong>100</strong></li>
+          <li>Total annual licensing: <strong>Rs 25,80,000</strong></li>
+        </ul>
+      </article>
+
+      <article class="section">
+        <span class="kicker">Usage</span>
+        <h2>Query pricing logic</h2>
+        <p class="section-intro">
+          Query pricing should be explained as workload-based consumption. Simple SOP lookups and
+          complex cross-document analysis do not consume the same resources, so the structure remains commercially rational.
+        </p>
+        <ul>
+          <li>Selected reference bundle: <strong>Standard</strong></li>
+          <li>Monthly reference bundle: <strong>Rs 12,000</strong></li>
+          <li>Annual query reference: <strong>Rs 1,44,000</strong></li>
+          <li>Best framing: transparent, usage-linked, and controllable</li>
+        </ul>
+      </article>
+
+      <article class="section">
+        <span class="kicker">Support</span>
+        <h2>Recurring support rationale</h2>
+        <p class="section-intro">
+          The AMC line is deliberately moderate. It supports maintenance, operational adjustments,
+          bug handling, and continuity without reopening the full setup budget each year.
+        </p>
+        <ul>
+          <li>AMC basis: <strong>10 percent of setup</strong></li>
+          <li>Annual AMC: <strong>Rs 2,40,000</strong></li>
+          <li>Commercial benefit: easy to explain and easy to renew</li>
+          <li>Procurement posture: cleaner than large unspecified support buckets</li>
+        </ul>
+      </article>
+    </section>
+
+    <section class="section">
+      <span class="kicker">Cloud Reference</span>
+      <h2>How to handle the hosting conversation</h2>
+      <p class="section-intro">
+        Hosting should be presented as an operational reference layer rather than as the heart of the
+        commercial discussion. The product value is in deployment, governance, retrieval quality, multilingual support,
+        and adoption outcomes. The cloud line is simply the delivery baseline for a resilient production environment.
+      </p>
+      <div class="table-card">
+        <table>
+          <thead>
+            <tr>
+              <th>Cloud reference line</th>
+              <th>Annual amount</th>
+              <th>Reason it exists</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Compute and processing capacity</td>
+              <td class="amount">Included in reference</td>
+              <td>Needed to support application traffic, ingestion throughput, and document-processing load.</td>
+            </tr>
+            <tr>
+              <td>Managed databases and storage</td>
+              <td class="amount">Included in reference</td>
+              <td>Required for operational records, retrieval indexes, uploaded documents, backups, and growth headroom.</td>
+            </tr>
+            <tr>
+              <td>Security, networking, and monitoring</td>
+              <td class="amount">Included in reference</td>
+              <td>Supports uptime, controlled access, observability, and production readiness.</td>
+            </tr>
+            <tr>
+              <td>Total annual reference</td>
+              <td class="amount">Rs 19,33,684</td>
+              <td>Use as a delivery-reference figure unless the client requests fully bundled managed hosting.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note">
+        Best answer if asked why cloud is not inside the core quote: the product price and the operating environment are separated
+        to keep commercial transparency. This usually makes pricing discussions cleaner, not harder.
+      </div>
+    </section>
+
+    <section class="section">
+      <span class="kicker">Optional Scope</span>
+      <h2>Add-ons and when to bring them in</h2>
+      <div class="table-card">
+        <table>
+          <thead>
+            <tr>
+              <th>Add-on</th>
+              <th>Commercial type</th>
+              <th>Amount</th>
+              <th>When it should be discussed</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Custom model fine-tuning</td>
+              <td>One-time</td>
+              <td class="amount">Rs 4,50,000</td>
+              <td>Only if the client asks for domain-specialized behavior beyond grounded retrieval.</td>
+            </tr>
+            <tr>
+              <td>Multi-language support</td>
+              <td>One-time</td>
+              <td class="amount">Rs 2,00,000</td>
+              <td>Good lever when the discussion shifts to multilingual operator adoption.</td>
+            </tr>
+            <tr>
+              <td>Advanced analytics dashboard</td>
+              <td>Annual</td>
+              <td class="amount">Rs 1,50,000</td>
+              <td>Bring in only if plant leadership asks for deeper reporting and cross-site analysis.</td>
+            </tr>
+            <tr>
+              <td>Dedicated account manager</td>
+              <td>Annual</td>
+              <td class="amount">Rs 3,00,000</td>
+              <td>Useful for enterprise governance-heavy engagements, not always necessary in the first close.</td>
+            </tr>
+            <tr>
+              <td>99.9 percent SLA upgrade</td>
+              <td>Annual</td>
+              <td class="amount">Rs 2,00,000</td>
+              <td>Use only if the client explicitly asks for a higher support and availability commitment.</td>
+            </tr>
+            <tr>
+              <td>On-premise deployment setup</td>
+              <td>One-time</td>
+              <td class="amount">Rs 8,00,000</td>
+              <td>Discuss only when data-residency or internal IT policy makes hosted delivery difficult.</td>
+            </tr>
+            <tr>
+              <td>On-premise annual support</td>
+              <td>Annual</td>
+              <td class="amount">Rs 3,00,000</td>
+              <td>Comes with on-premise only, not with the standard managed deployment structure.</td>
+            </tr>
+            <tr>
+              <td>Messaging channel integration</td>
+              <td>One-time</td>
+              <td class="amount">Rs 1,50,000</td>
+              <td>Discuss later if the client wants operator access beyond the main application surface.</td>
+            </tr>
+            <tr>
+              <td>Mobile application package</td>
+              <td>One-time</td>
+              <td class="amount">Rs 3,50,000</td>
+              <td>Useful as a future expansion lever, not necessary for the core commercial close.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="two-col-grid">
+      <article class="section">
+        <span class="kicker">Negotiation Guardrails</span>
+        <h2>What can move and what should not</h2>
+        <ul>
+          <li><strong>Can move:</strong> payment milestones, query bundle choice, selected add-ons, and cloud-hosting packaging.</li>
+          <li><strong>Can move carefully:</strong> Year 1 commercials through phased rollout, limited pilot scoping, or plant-count staging.</li>
+          <li><strong>Should not move aggressively:</strong> core setup fee, because that is where delivery effort and deployment accountability sit.</li>
+          <li><strong>Best concession path:</strong> keep setup intact, reduce Year 1 pressure through phased user rollout or a smaller initial bundle.</li>
+          <li><strong>Avoid:</strong> cutting licensing too early. It weakens long-term pricing discipline and is harder to recover later.</li>
+        </ul>
+      </article>
+
+      <article class="section">
+        <span class="kicker">Deployment Smoothness</span>
+        <h2>Commercial points that make rollout easier</h2>
+        <ul>
+          <li>Use a phased rollout narrative: pilot plants first, then scale across the network.</li>
+          <li>Keep infrastructure described as a delivery baseline, not as a stack shopping list.</li>
+          <li>Lead with multilingual readiness, governed answers, and auditability as adoption drivers.</li>
+          <li>Anchor Year 1 on implementation and operating reliability, not on raw AI cost.</li>
+          <li>If procurement presses on price, respond with scope and sequencing rather than pure discounting.</li>
+        </ul>
+        <div class="note yellow">
+          Cleanest path in discussion: protect the setup fee, keep support logic simple, and use rollout phasing as the primary commercial flexibility lever.
+        </div>
+      </article>
+    </section>
+
+    <footer class="footer">
+      <div>Jubilant Ingrevia Plant Assistant Pricing Justification</div>
+      <div>Internal commercial discussion document</div>
+    </footer>
+  </main>
+</body>
+</html>

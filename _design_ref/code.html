@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Operational Trust | Forensic Investigator Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=Space+Grotesk:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "on-secondary-container": "#6f5100",
+                      "on-primary-container": "#8895ff",
+                      "inverse-on-surface": "#f0f1f2",
+                      "outline-variant": "#c5c5d6",
+                      "on-primary": "#ffffff",
+                      "on-secondary-fixed-variant": "#5c4300",
+                      "secondary-fixed": "#ffdea0",
+                      "surface-dim": "#d9dadb",
+                      "on-surface": "#191c1d",
+                      "on-primary-fixed": "#000a63",
+                      "on-error-container": "#93000a",
+                      "background": "#f8f9fa",
+                      "outline": "#757686",
+                      "on-secondary": "#ffffff",
+                      "surface-container-low": "#f3f4f5",
+                      "secondary": "#795900",
+                      "surface-container-highest": "#e1e3e4",
+                      "tertiary": "#490100",
+                      "surface-container-high": "#e7e8e9",
+                      "tertiary-fixed": "#ffdad4",
+                      "surface-tint": "#3f4fd1",
+                      "primary-fixed-dim": "#bcc2ff",
+                      "on-tertiary-fixed-variant": "#8a1b0f",
+                      "tertiary-fixed-dim": "#ffb4a7",
+                      "surface-container-lowest": "#ffffff",
+                      "surface-variant": "#e1e3e4",
+                      "on-error": "#ffffff",
+                      "surface": "#f8f9fa",
+                      "inverse-surface": "#2e3132",
+                      "primary-container": "#0019a8",
+                      "error-container": "#ffdad6",
+                      "secondary-container": "#fcc340",
+                      "on-surface-variant": "#454654",
+                      "on-background": "#191c1d",
+                      "surface-container": "#edeeef",
+                      "on-secondary-fixed": "#261900",
+                      "tertiary-container": "#700501",
+                      "primary-fixed": "#dfe0ff",
+                      "error": "#ba1a1a",
+                      "primary": "#000d6e",
+                      "on-primary-fixed-variant": "#2234b9",
+                      "secondary-fixed-dim": "#f6be3b",
+                      "inverse-primary": "#bcc2ff",
+                      "surface-bright": "#f8f9fa",
+                      "on-tertiary-fixed": "#400100",
+                      "on-tertiary-container": "#ff725c",
+                      "on-tertiary": "#ffffff"
+              },
+              "borderRadius": {
+                      "DEFAULT": "1rem",
+                      "lg": "2rem",
+                      "xl": "3rem",
+                      "full": "9999px"
+              },
+              "fontFamily": {
+                      "headline": ["Plus Jakarta Sans"],
+                      "body": ["Plus Jakarta Sans"],
+                      "label": ["Space Grotesk"]
+              }
+            },
+          }
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .phi-grid {
+            background-image: radial-gradient(circle, #c5c5d6 1px, transparent 1px);
+            background-size: 40px 40px;
+            opacity: 0.15;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(16px);
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body selection:bg-primary-container selection:text-white">
+<!-- TopNavBar -->
+<header class="sticky top-0 w-full z-50 flex justify-between items-center px-6 py-4 mx-auto bg-[#0019a8] dark:bg-slate-950 shadow-lg">
+<div class="flex items-center gap-8">
+<h1 class="text-xl font-bold text-white tracking-tight font-headline">Operational Trust</h1>
+<nav class="hidden md:flex items-center gap-6">
+<a class="font-sans font-bold tracking-tight text-white border-b-4 border-white pb-1" href="#">Product</a>
+<a class="font-sans font-bold tracking-tight text-white/80 hover:text-white transition-colors" href="#">Solutions</a>
+<a class="font-sans font-bold tracking-tight text-white/80 hover:text-white transition-colors" href="#">Pricing</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<button class="bg-white/10 text-white px-5 py-2 rounded-full font-headline font-bold text-sm hover:bg-white/20 transition-all Active: opacity-80 duration-150">
+                Request Demo
+            </button>
+<div class="h-8 w-8 rounded-full bg-secondary-container flex items-center justify-center overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="professional portrait of a forensic investigator in a clean white studio setting with soft lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDjtDryO0ut3E3tUEug5JMwRyXDZK6Dq4lv6JxjPGWlElyL3GczWADaTHYsyaBaDDG5gcYWx4lB4duguVmQylMBGJOmWmQ1IQaKkyaQOx1_fB_os5ELJ59ajZBWs2GQW77b78Nu07BdkAjhk3yojChVoTsIbCFW73cJhsvr5Hfyby1xEZ-aylhS41Lk2twVwqhy80eYcqj0uyKF7wCvNV2A_XXa8YIt6QKTBr959py2k6GCmPw10ueRKWGiVsdyI40ZSmkfxs_YyeU"/>
+</div>
+</div>
+</header>
+<main class="relative min-h-screen">
+<!-- Background Decor: Mathematical Precision Grid -->
+<div class="phi-grid absolute inset-0 pointer-events-none"></div>
+<div class="max-w-7xl mx-auto px-6 py-12 relative z-10">
+<!-- Hero Greeting Section -->
+<div class="mb-12 flex flex-col md:flex-row justify-between items-end gap-6">
+<div>
+<span class="font-label text-on-surface-variant text-xs uppercase tracking-[0.2em] mb-2 block">System Status: OPERATIONAL // 1.618</span>
+<h2 class="text-5xl font-extrabold tracking-tight text-on-background font-headline">Good morning, <span class="text-primary-container">Aarav Sharma</span></h2>
+<p class="text-on-surface-variant mt-4 max-w-lg leading-relaxed">Your forensic overview for today is synchronized. 4 active cases require validation within the next shift window.</p>
+</div>
+<div class="bg-surface-container-lowest rounded-lg p-4 shadow-sm border border-outline-variant/10 flex items-center gap-4">
+<div class="relative flex h-3 w-3">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-secondary opacity-75"></span>
+<span class="relative inline-flex rounded-full h-3 w-3 bg-secondary"></span>
+</div>
+<div>
+<p class="font-label text-[10px] text-on-surface-variant leading-none mb-1">LIVE TELEMETRY</p>
+<p class="font-headline font-bold text-sm text-on-surface">Shift Monitoring Live</p>
+</div>
+</div>
+</div>
+<!-- Bento Grid Layout -->
+<div class="grid grid-cols-1 md:grid-cols-12 gap-8">
+<!-- Command Hub: Large Feature Card -->
+<div class="md:col-span-8 bg-surface-container-lowest rounded-xl p-8 shadow-[0_40px_60px_-15px_rgba(0,13,110,0.06)] relative overflow-hidden group">
+<div class="absolute top-0 right-0 p-8 opacity-5">
+<span class="material-symbols-outlined text-[120px]" style="font-variation-settings: 'FILL' 1;">security</span>
+</div>
+<div class="relative z-10">
+<div class="flex justify-between items-start mb-12">
+<div>
+<h3 class="text-2xl font-bold font-headline mb-1">Command Hub</h3>
+<p class="text-on-surface-variant text-sm font-label">CENTRAL_OPS_V4.2</p>
+</div>
+<span class="material-symbols-outlined text-primary-container">dashboard_customize</span>
+</div>
+<div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+<div class="bg-surface-container-low p-6 rounded-lg hover:bg-surface-container-high transition-colors cursor-pointer group">
+<div class="flex items-center gap-4 mb-4">
+<span class="material-symbols-outlined text-primary-container bg-white p-2 rounded-lg shadow-sm">visibility</span>
+<p class="font-bold font-headline">Evidence Review</p>
+</div>
+<div class="h-2 w-full bg-outline-variant/20 rounded-full overflow-hidden">
+<div class="h-full bg-primary-container w-[75%]"></div>
+</div>
+<p class="mt-2 text-xs text-on-surface-variant font-label">12/16 Verified</p>
+</div>
+<div class="bg-surface-container-low p-6 rounded-lg hover:bg-surface-container-high transition-colors cursor-pointer">
+<div class="flex items-center gap-4 mb-4">
+<span class="material-symbols-outlined text-primary-container bg-white p-2 rounded-lg shadow-sm">terminal</span>
+<p class="font-bold font-headline">Data Analytics</p>
+</div>
+<div class="h-2 w-full bg-outline-variant/20 rounded-full overflow-hidden">
+<div class="h-full bg-secondary w-[40%]"></div>
+</div>
+<p class="mt-2 text-xs text-on-surface-variant font-label">Processing Batch 09</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Next Task Card -->
+<div class="md:col-span-4 bg-primary-container rounded-xl p-8 text-white flex flex-col justify-between shadow-xl">
+<div>
+<div class="flex items-center justify-between mb-8">
+<span class="font-label text-xs tracking-widest text-on-primary-container uppercase">Priority Task</span>
+<span class="material-symbols-outlined">schedule</span>
+</div>
+<h3 class="text-3xl font-extrabold font-headline leading-tight mb-4">Biometric Cryptography Validation</h3>
+<p class="text-on-primary-container text-sm leading-relaxed">Complete the 128-bit key sequence verification for Case #884-X by 14:00 today.</p>
+</div>
+<button class="mt-8 bg-white text-primary-container font-bold py-4 rounded-full hover:bg-on-primary-container hover:text-white transition-all shadow-lg flex items-center justify-center gap-2">
+                        Initialize Session
+                        <span class="material-symbols-outlined text-sm">arrow_forward</span>
+</button>
+</div>
+<!-- Training & Reports: Horizontal Layering -->
+<div class="md:col-span-6 bg-surface-container-low rounded-xl p-8 group">
+<div class="flex items-center justify-between mb-6">
+<div class="flex items-center gap-4">
+<div class="h-12 w-12 bg-white rounded-xl flex items-center justify-center shadow-sm">
+<span class="material-symbols-outlined text-primary-container">school</span>
+</div>
+<div>
+<h4 class="font-bold font-headline">Training Modules</h4>
+<p class="text-xs text-on-surface-variant font-label">UP NEXT: ADVANCED HEURISTICS</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-on-surface-variant group-hover:translate-x-1 transition-transform">chevron_right</span>
+</div>
+<div class="flex items-center gap-4 p-4 bg-white/50 rounded-lg">
+<img class="w-20 h-14 object-cover rounded-md" data-alt="high-tech computer server room with blue lighting and digital circuitry overlay" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDLIcd8kqvdenkG__33b-k4Wqqpafp0XLwvfCX9VqUy0w3ZACWqq7q8cM1dOfB3cWVxjCIRwnE_89__LrBYjaHHNelAWAtmwXLBHO1aMBOPB9be3MVx6Qw4fDw7I6ixzYGsRQz6j5dWlJNmSn-IWnlFkF7yIkZDOZb61XEZPW6-6hNL3BA9G84LzSlcQhYmfbPJJHhgaJ8FXWTUo0u6OX3iXsRSJ6p7uP5gIHs1zlvV-PmWVOfPvAp2WEr1ckG2HdD7sB18-vKQqh4"/>
+<div>
+<p class="text-sm font-bold">Network Forensics 201</p>
+<p class="text-xs text-on-surface-variant">25 mins remaining</p>
+</div>
+</div>
+</div>
+<div class="md:col-span-6 bg-surface-container-low rounded-xl p-8 group">
+<div class="flex items-center justify-between mb-6">
+<div class="flex items-center gap-4">
+<div class="h-12 w-12 bg-white rounded-xl flex items-center justify-center shadow-sm">
+<span class="material-symbols-outlined text-primary-container">article</span>
+</div>
+<div>
+<h4 class="font-bold font-headline">Compliance Reports</h4>
+<p class="text-xs text-on-surface-variant font-label">LAST GENERATED: 04:00 AM</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-on-surface-variant group-hover:translate-x-1 transition-transform">chevron_right</span>
+</div>
+<div class="space-y-3">
+<div class="flex justify-between items-center text-sm border-b border-outline-variant/20 pb-2">
+<span class="font-medium">Incident_Log_Q3.pdf</span>
+<span class="text-on-surface-variant font-label text-[10px]">VERIFIED</span>
+</div>
+<div class="flex justify-between items-center text-sm border-b border-outline-variant/20 pb-2">
+<span class="font-medium">Chain_of_Custody_R4.pdf</span>
+<span class="text-on-surface-variant font-label text-[10px]">PENDING</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Mathematical Detail: Asymmetric Diagram Section -->
+<div class="mt-16 grid grid-cols-1 lg:grid-cols-3 gap-12 items-center">
+<div class="lg:col-span-1">
+<h5 class="font-label text-xs text-secondary font-bold tracking-widest mb-4">PRECISION_METRIC_01</h5>
+<p class="text-on-surface text-lg font-headline leading-tight mb-4">Our interface is architected around the Golden Ratio (1.618) to ensure focus on critical forensic data points.</p>
+<div class="h-[1px] w-24 bg-secondary"></div>
+</div>
+<div class="lg:col-span-2 bg-surface rounded-xl border border-secondary-fixed/30 p-8 relative overflow-hidden flex items-center justify-center min-h-[300px]">
+<!-- Fibonacci Visualization Mock -->
+<div class="absolute inset-0 opacity-10 flex items-center justify-center">
+<svg class="w-full h-full stroke-secondary fill-none" viewbox="0 0 100 100">
+<rect height="61.8" stroke-width="0.5" width="100" x="0" y="0"></rect>
+<rect height="61.8" stroke-width="0.5" width="38.2" x="0" y="0"></rect>
+<rect height="38.2" stroke-width="0.5" width="61.8" x="38.2" y="0"></rect>
+<circle cx="0" cy="61.8" r="61.8" stroke-dasharray="2 2" stroke-width="0.2"></circle>
+</svg>
+</div>
+<div class="grid grid-cols-2 md:grid-cols-4 gap-8 w-full relative z-10 text-center">
+<div>
+<p class="font-label text-3xl font-bold text-primary">99.8%</p>
+<p class="text-xs text-on-surface-variant font-medium">Uptime</p>
+</div>
+<div>
+<p class="font-label text-3xl font-bold text-primary">0.02ms</p>
+<p class="text-xs text-on-surface-variant font-medium">Latency</p>
+</div>
+<div>
+<p class="font-label text-3xl font-bold text-primary">4.2TB</p>
+<p class="text-xs text-on-surface-variant font-medium">Data Analyzed</p>
+</div>
+<div>
+<p class="font-label text-3xl font-bold text-primary">12k</p>
+<p class="text-xs text-on-surface-variant font-medium">Threats Blocked</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="w-full py-12 px-8 flex flex-col md:flex-row justify-between items-center gap-6 bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 rounded-t-3xl">
+<div class="flex flex-col items-center md:items-start gap-2">
+<h1 class="text-lg font-bold text-[#0019a8] dark:text-blue-400 font-headline">Operational Trust</h1>
+<p class="font-sans text-sm text-slate-600 dark:text-slate-400">© 2024 Operational Trust. Inspired by TfL Design Standards.</p>
+</div>
+<div class="flex gap-8">
+<a class="font-sans text-sm text-slate-600 dark:text-slate-400 hover:underline hover:text-[#0019a8] dark:hover:text-blue-300" href="#">Privacy Policy</a>
+<a class="font-sans text-sm text-slate-600 dark:text-slate-400 hover:underline hover:text-[#0019a8] dark:hover:text-blue-300" href="#">Terms of Service</a>
+<a class="font-sans text-sm text-slate-600 dark:text-slate-400 hover:underline hover:text-[#0019a8] dark:hover:text-blue-300" href="#">Security</a>
+<a class="font-sans text-sm text-[#0019a8] font-semibold hover:underline" href="#">Contact</a>
+</div>
+</footer>
+<!-- Bottom Navigation Mobile -->
+<div class="md:hidden fixed bottom-0 left-0 right-0 glass-panel border-t border-outline-variant/10 px-8 py-4 flex justify-between items-center z-50">
+<div class="flex flex-col items-center gap-1 text-primary-container">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">home</span>
+<span class="font-label text-[10px] font-bold">Home</span>
+</div>
+<div class="flex flex-col items-center gap-1 text-on-surface-variant">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="font-label text-[10px]">Hub</span>
+</div>
+<div class="flex flex-col items-center gap-1 text-on-surface-variant">
+<span class="material-symbols-outlined">analytics</span>
+<span class="font-label text-[10px]">Reports</span>
+</div>
+<div class="flex flex-col items-center gap-1 text-on-surface-variant">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-label text-[10px]">Settings</span>
+</div>
+</div>
+</body></html>
