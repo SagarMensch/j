@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jubilant Ingrevia Pricing & Justifications - pgvector & Mistral</title>
+    <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --ibm-blue: #0f62fe;
+            --rh-green: #00c805;
+            --solid-yellow: #ffd700;
+            --text-main: #111111;
+            --bg-main: #ffffff;
+            --border-light: #e0e0e0;
+        }
+        body {
+            font-family: 'Figtree', sans-serif;
+            background-color: var(--bg-main);
+            color: var(--text-main);
+            line-height: 1.6;
+            margin: 0;
+            padding: 40px 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        h1, h2, h3 {
+            color: var(--ibm-blue);
+            margin-top: 1.5em;
+        }
+        h1 {
+            font-size: 2.5rem;
+            border-bottom: 4px solid var(--rh-green);
+            padding-bottom: 10px;
+            margin-bottom: 30px;
+        }
+        h2 {
+            border-bottom: 2px solid var(--border-light);
+            padding-bottom: 5px;
+        }
+        .note {
+            background-color: var(--solid-yellow);
+            color: #000;
+            padding: 15px 20px;
+            border-radius: 8px;
+            font-weight: 500;
+            margin: 20px 0;
+            border-left: 6px solid #e5c100;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 25px 0;
+            font-size: 0.95em;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.05);
+        }
+        table th, table td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-light);
+            vertical-align: top;
+        }
+        table th {
+            background-color: var(--rh-green);
+            color: white;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        table tr:last-of-type td {
+            border-bottom: 2px solid var(--ibm-blue);
+        }
+        .highlight-green {
+            color: var(--rh-green);
+            font-weight: 700;
+        }
+        .highlight-blue {
+            color: var(--ibm-blue);
+            font-weight: 700;
+        }
+        ul {
+            padding-left: 20px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        hr {
+            border: 0;
+            height: 1px;
+            background: var(--border-light);
+            margin: 40px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Jubilant Ingrevia Pricing Justifications</h1>
+        
+        <div class="note">
+            <strong>Architecture Note (Mistral & pgvector):</strong> This document outlines the pricing and structural logic based on your custom deployment using fine-tuned Mistral open-source models and PostgreSQL (pgvector).
+        </div>
+
+        <h2>1. One-Time Setup Costs</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Component</th>
+                    <th>Cost (INR)</th>
+                    <th>Justification & Industry Benchmark</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>AI Platform Deployment</strong></td>
+                    <td class="highlight-blue">₹3,50,000</td>
+                    <td>Multi-tenant architecture (50 isolated workspaces). Includes Kubernetes, API gateway, OAuth.<br><em>Benchmark: ₹7-12L for enterprise SaaS.</em></td>
+                </tr>
+                <tr>
+                    <td><strong>Document Ingestion</strong></td>
+                    <td class="highlight-blue">₹4,50,000</td>
+                    <td>Processes 20,000 pages pipeline. Chunks and creates embeddings directly into your <strong>PostgreSQL (pgvector)</strong> database. Keeps data 100% compliant.</td>
+                </tr>
+                <tr>
+                    <td><strong>Custom Mistral Fine-Tuning</strong></td>
+                    <td class="highlight-blue">Included</td>
+                    <td>Custom fine-tuning of the Mistral model strictly for chemical manufacturing SOPs and accurate extraction.</td>
+                </tr>
+                <tr>
+                    <td><strong>Integration Layer</strong></td>
+                    <td class="highlight-blue">₹2,50,000</td>
+                    <td>REST API, SSO (Azure/Okta) integration, ERP connectors (SAP/Oracle).</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <hr>
+
+        <h2>2. Cloud Infrastructure Sizing (AWS Data Center)</h2>
+        <p>The system is physically hosted in the heavily secured <strong>AWS Mumbai Region</strong>. The infrastructure costs are highly optimized utilizing AWS Reserved Instances.</p>
+        <ul>
+            <li><strong>App Server (2x `t3.xlarge`):</strong> Handles 30 concurrent users effortlessly. <em>Cost: ~₹20k/mo.</em></li>
+            <li><strong>AI/ML Processing (2x `g4dn.xlarge` via AWS):</strong> Because you are utilizing a custom Fine-Tuned Mistral model, AWS provides the NVIDIA GPUs on rent natively. You do NOT need to buy them. AWS provisions these automatically to ensure rapid AI speeds. <em>Cost: ~₹65k/mo.</em></li>
+            <li><strong>Database (PostgreSQL RDS):</strong> Utilizing <code>pgvector</code> natively within AWS RDS. By consolidating user data and AI vectors into Postgres, you avoid paying massive premiums to 3rd-party vector tools like Pinecone or Qdrant. <em>Massive cost saving.</em></li>
+        </ul>
+
+        <hr>
+
+        <h2>3. Annual User Licensing & Market Comparison</h2>
+        <p><strong>Total Annual Licensing: <span class="highlight-blue">₹25,80,000</span></strong> (For 50 Admins, 50 Standard Users)</p>
+        <table>
+            <thead>
+                <tr>
+                    <th>Role</th>
+                    <th>Price (INR)</th>
+                    <th>Market Comparison & Justification</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Admin User</strong></td>
+                    <td class="highlight-blue">₹30,000 /yr<br><small>(₹2,500/mo)</small></td>
+                    <td>Full workspace management. <strong class="highlight-green">Salesforce Admin</strong> (₹42k/yr) and <strong class="highlight-green">ServiceNow Admin</strong> (₹50k/yr) are 40-68% more expensive.</td>
+                </tr>
+                <tr>
+                    <td><strong>Standard User</strong></td>
+                    <td class="highlight-blue">₹21,600 /yr<br><small>(₹1,800/mo)</small></td>
+                    <td>Read/Query access. <strong class="highlight-green">Tableau Viewer</strong> (₹30k/yr) is 39% more expensive.</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <hr>
+
+        <h2>4. On-Premise vs Cloud Deployment Rules</h2>
+        <div class="note" style="background-color: var(--ibm-blue); color: white; border-left-color: #0b49c0;">
+            <strong>Hardware Rule:</strong> If they elect to go 100% On-Premise (Local Air-Gapped Data Center instead of AWS): They avoid the Annual AWS Cloud Infrastructure costs entirely. <strong>However</strong>, they must physically purchase the Server Hardware and NVIDIA GPUs for their server room, which becomes their internal CapEx cost.
+        </div>
+        <ul>
+            <li><strong>AWS Cloud (Default):</strong> ~₹8.5 Lakhs/yr. You rent everything (including GPUs for Mistral) from AWS. Zero hardware purchase required.</li>
+            <li><strong style="color: red;">On-Premise (Strict Security):</strong> They pay you an additional <strong>₹8 Lakhs One-Time Setup</strong> to install it in their physical datacenter. They must provide the server hardware.</li>
+        </ul>
+    </div>
+</body>
+</html>

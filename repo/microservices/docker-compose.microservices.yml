@@ -1,0 +1,72 @@
+version: "3.9"
+
+services:
+  identity-service:
+    image: python:3.12-slim
+    working_dir: /app
+    volumes:
+      - ..:/app
+    command: bash -lc "pip install -r backend/requirements.txt && pip install -r microservices/requirements.txt && uvicorn microservices.identity_service.app:app --host 0.0.0.0 --port 8101"
+    ports:
+      - "8101:8101"
+
+  knowledge-service:
+    image: python:3.12-slim
+    working_dir: /app
+    volumes:
+      - ..:/app
+    command: bash -lc "pip install -r backend/requirements.txt && pip install -r microservices/requirements.txt && uvicorn microservices.knowledge_service.app:app --host 0.0.0.0 --port 8102"
+    ports:
+      - "8102:8102"
+
+  training-service:
+    image: python:3.12-slim
+    working_dir: /app
+    volumes:
+      - ..:/app
+    command: bash -lc "pip install -r backend/requirements.txt && pip install -r microservices/requirements.txt && uvicorn microservices.training_service.app:app --host 0.0.0.0 --port 8103"
+    ports:
+      - "8103:8103"
+
+  assessment-service:
+    image: python:3.12-slim
+    working_dir: /app
+    volumes:
+      - ..:/app
+    command: bash -lc "pip install -r backend/requirements.txt && pip install -r microservices/requirements.txt && uvicorn microservices.assessment_service.app:app --host 0.0.0.0 --port 8104"
+    ports:
+      - "8104:8104"
+
+  analytics-service:
+    image: python:3.12-slim
+    working_dir: /app
+    volumes:
+      - ..:/app
+    command: bash -lc "pip install -r backend/requirements.txt && pip install -r microservices/requirements.txt && uvicorn microservices.analytics_service.app:app --host 0.0.0.0 --port 8105"
+    ports:
+      - "8105:8105"
+
+  voice-service:
+    image: python:3.12-slim
+    working_dir: /app
+    volumes:
+      - ..:/app
+    command: bash -lc "pip install -r backend/requirements.txt && pip install -r microservices/requirements.txt && uvicorn microservices.voice_service.app:app --host 0.0.0.0 --port 8106"
+    ports:
+      - "8106:8106"
+
+  api-gateway:
+    image: python:3.12-slim
+    working_dir: /app
+    volumes:
+      - ..:/app
+    command: bash -lc "pip install -r backend/requirements.txt && pip install -r microservices/requirements.txt && uvicorn microservices.api_gateway.app:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+    depends_on:
+      - identity-service
+      - knowledge-service
+      - training-service
+      - assessment-service
+      - analytics-service
+      - voice-service

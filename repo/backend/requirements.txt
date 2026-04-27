@@ -1,0 +1,37 @@
+# Core API
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+python-dotenv==1.0.1
+httpx==0.27.0
+python-multipart==0.0.9
+
+# Settings and validation
+pydantic==2.8.0
+pydantic-settings==2.4.0
+
+# Relational data
+sqlalchemy==2.0.36
+psycopg[binary]==3.2.3
+
+# Knowledge graph
+neo4j==5.26.0
+
+# Prompt optimization and retrieval
+dspy-ai
+sentence-transformers
+rank-bm25
+
+# Extraction and PDF handling
+pypdf==5.3.1
+pypdfium2==4.30.0
+pymupdf>=1.24.7
+docling>=1.5.0
+paddlepaddle>=2.6.0
+paddleocr>=2.7.0
+
+# Embeddings
+torch>=2.0.0
+sentence-transformers>=2.2.0
+
+# BM25 retrieval
+rank-bm25>=0.2.2

@@ -1,0 +1,804 @@
+{
+  "Summary Dashboard": [
+    {
+      "JUBILANT INGREVIA - AI AGENT PRICING CALCULATOR": "",
+      "Unnamed: 1": "",
+      "Unnamed: 2": ""
+    },
+    {
+      "JUBILANT INGREVIA - AI AGENT PRICING CALCULATOR": "PROJECT PARAMETERS",
+      "Unnamed: 1": "",
+      "Unnamed: 2": ""
+    },
+    {
+      "JUBILANT INGREVIA - AI AGENT PRICING CALCULATOR": "Total Plants",
+      "Unnamed: 1": 50.0,
+      "Unnamed: 2": "(Editable)"
+    },
+    {
+      "JUBILANT INGREVIA - AI AGENT PRICING CALCULATOR": "Users per Plant",
+      "Unnamed: 1": 2.0,
+      "Unnamed: 2": "(1 Admin + 1 User)"
+    },
+    {
+      "JUBILANT INGREVIA - AI AGENT PRICING CALCULATOR": "Total Users",
+      "Unnamed: 1": 100.0,
+      "Unnamed: 2": ""
+    },
+    {
+      "JUBILANT INGREVIA - AI AGENT PRICING CALCULATOR": "Total Documents",
+      "Unnamed: 1": 1000.0,
+      "Unnamed: 2": "(Editable)"
+    },
+    {
+      "JUBILANT INGREVIA - AI AGENT PRICING CALCULATOR": "",
+      "Unnamed: 1": "",
+      "Unnamed: 2": ""
+    },
+    {
+      "JUBILANT INGREVIA - AI AGENT PRICING CALCULATOR": "COST SUMMARY - YEAR 1",
+      "Unnamed: 1": "",
+      "Unnamed: 2": ""
+    },
+    {
+      "JUBILANT INGREVIA - AI AGENT PRICING CALCULATOR": "One-Time Setup Cost",
+      "Unnamed: 1": 2200000.0,
+      "Unnamed: 2": ""
+    },
+    {
+      "JUBILANT INGREVIA - AI AGENT PRICING CALCULATOR": "Annual User Licensing",
+      "Unnamed: 1": 2580000.0,
+      "Unnamed: 2": ""
+    },
+    {
+      "JUBILANT INGREVIA - AI AGENT PRICING CALCULATOR": "Query Consumption (Annual)",
+      "Unnamed: 1": 144000.0,
+      "Unnamed: 2": ""
+    },
+    {
+      "JUBILANT INGREVIA - AI AGENT PRICING CALCULATOR": "Sub-Total (Before GST)",
+      "Unnamed: 1": 4924000.0,
+      "Unnamed: 2": ""
+    },
+    {
+      "JUBILANT INGREVIA - AI AGENT PRICING CALCULATOR": "TOTAL YEAR 1 COST",
+      "Unnamed: 1": 4924000.0,
+      "Unnamed: 2": ""
+    },
+    {
+      "JUBILANT INGREVIA - AI AGENT PRICING CALCULATOR": "",
+      "Unnamed: 1": "",
+      "Unnamed: 2": ""
+    },
+    {
+      "JUBILANT INGREVIA - AI AGENT PRICING CALCULATOR": "YEAR 2+ RECURRING COSTS",
+      "Unnamed: 1": "",
+      "Unnamed: 2": ""
+    },
+    {
+      "JUBILANT INGREVIA - AI AGENT PRICING CALCULATOR": "Annual User Licensing",
+      "Unnamed: 1": 2580000.0,
+      "Unnamed: 2": ""
+    },
+    {
+      "JUBILANT INGREVIA - AI AGENT PRICING CALCULATOR": "Query Consumption (Annual)",
+      "Unnamed: 1": 144000.0,
+      "Unnamed: 2": ""
+    },
+    {
+      "JUBILANT INGREVIA - AI AGENT PRICING CALCULATOR": "AMC & Support (10% of Setup)",
+      "Unnamed: 1": 220000.0,
+      "Unnamed: 2": ""
+    },
+    {
+      "JUBILANT INGREVIA - AI AGENT PRICING CALCULATOR": "Sub-Total",
+      "Unnamed: 1": 2944000.0,
+      "Unnamed: 2": ""
+    },
+    {
+      "JUBILANT INGREVIA - AI AGENT PRICING CALCULATOR": "TOTAL YEAR 2+ (Annual)",
+      "Unnamed: 1": 2944000.0,
+      "Unnamed: 2": ""
+    }
+  ],
+  "One-Time Setup": [
+    {
+      "ONE-TIME SETUP COSTS": "",
+      "Unnamed: 1": ""
+    },
+    {
+      "ONE-TIME SETUP COSTS": "A. PLATFORM SETUP & CONFIGURATION",
+      "Unnamed: 1": ""
+    },
+    {
+      "ONE-TIME SETUP COSTS": "AI Agent Platform Deployment",
+      "Unnamed: 1": 350000.0
+    },
+    {
+      "ONE-TIME SETUP COSTS": "Document Ingestion & Vectorization",
+      "Unnamed: 1": 450000.0
+    },
+    {
+      "ONE-TIME SETUP COSTS": "Role-Based Access Control (RBAC)",
+      "Unnamed: 1": 200000.0
+    },
+    {
+      "ONE-TIME SETUP COSTS": "Plant-wise Configuration",
+      "Unnamed: 1": 250000.0
+    },
+    {
+      "ONE-TIME SETUP COSTS": "Integration Layer",
+      "Unnamed: 1": 250000.0
+    },
+    {
+      "ONE-TIME SETUP COSTS": "Security & Compliance",
+      "Unnamed: 1": 150000.0
+    },
+    {
+      "ONE-TIME SETUP COSTS": "Testing & QA",
+      "Unnamed: 1": 150000.0
+    },
+    {
+      "ONE-TIME SETUP COSTS": "Sub-Total: Platform Setup",
+      "Unnamed: 1": 1800000.0
+    },
+    {
+      "ONE-TIME SETUP COSTS": "",
+      "Unnamed: 1": ""
+    },
+    {
+      "ONE-TIME SETUP COSTS": "B. TRAINING & HANDHOLDING",
+      "Unnamed: 1": ""
+    },
+    {
+      "ONE-TIME SETUP COSTS": "Admin Training (2-day workshop)",
+      "Unnamed: 1": 150000.0
+    },
+    {
+      "ONE-TIME SETUP COSTS": "User Documentation",
+      "Unnamed: 1": 100000.0
+    },
+    {
+      "ONE-TIME SETUP COSTS": "Go-Live Support (2 weeks)",
+      "Unnamed: 1": 150000.0
+    },
+    {
+      "ONE-TIME SETUP COSTS": "Sub-Total: Training",
+      "Unnamed: 1": 400000.0
+    },
+    {
+      "ONE-TIME SETUP COSTS": "",
+      "Unnamed: 1": ""
+    },
+    {
+      "ONE-TIME SETUP COSTS": "TOTAL ONE-TIME SETUP COST",
+      "Unnamed: 1": 2200000.0
+    }
+  ],
+  "User Licensing": [
+    {
+      "ANNUAL USER LICENSING": "",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": "",
+      "Unnamed: 4": ""
+    },
+    {
+      "ANNUAL USER LICENSING": "User Type",
+      "Unnamed: 1": "Count",
+      "Unnamed: 2": "Annual Cost/User",
+      "Unnamed: 3": "Monthly Cost/User",
+      "Unnamed: 4": "Total Annual Cost"
+    },
+    {
+      "ANNUAL USER LICENSING": "Admin User",
+      "Unnamed: 1": 50,
+      "Unnamed: 2": 30000,
+      "Unnamed: 3": 2500,
+      "Unnamed: 4": 1500000
+    },
+    {
+      "ANNUAL USER LICENSING": "Standard User",
+      "Unnamed: 1": 50,
+      "Unnamed: 2": 21600,
+      "Unnamed: 3": 1800,
+      "Unnamed: 4": 1080000
+    },
+    {
+      "ANNUAL USER LICENSING": "",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": "",
+      "Unnamed: 4": ""
+    },
+    {
+      "ANNUAL USER LICENSING": "TOTAL USERS",
+      "Unnamed: 1": 100,
+      "Unnamed: 2": "",
+      "Unnamed: 3": "",
+      "Unnamed: 4": ""
+    },
+    {
+      "ANNUAL USER LICENSING": "",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": "",
+      "Unnamed: 4": ""
+    },
+    {
+      "ANNUAL USER LICENSING": "TOTAL ANNUAL LICENSING COST",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": "",
+      "Unnamed: 4": 2580000
+    },
+    {
+      "ANNUAL USER LICENSING": "",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": "",
+      "Unnamed: 4": ""
+    },
+    {
+      "ANNUAL USER LICENSING": "FEATURES INCLUDED:",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": "",
+      "Unnamed: 4": ""
+    },
+    {
+      "ANNUAL USER LICENSING": "\u2022 GCP/Azure Mumbai region hosting",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": "",
+      "Unnamed: 4": ""
+    },
+    {
+      "ANNUAL USER LICENSING": "\u2022 99.5% uptime SLA",
+      "Unnamed: 1": 2580000,
+      "Unnamed: 2": "",
+      "Unnamed: 3": "",
+      "Unnamed: 4": ""
+    },
+    {
+      "ANNUAL USER LICENSING": "\u2022 Business hours support (9 AM - 6 PM IST)",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": "",
+      "Unnamed: 4": ""
+    },
+    {
+      "ANNUAL USER LICENSING": "\u2022 Monthly usage reports",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": "",
+      "Unnamed: 4": ""
+    },
+    {
+      "ANNUAL USER LICENSING": "\u2022 Quarterly platform updates",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": "",
+      "Unnamed: 4": ""
+    },
+    {
+      "ANNUAL USER LICENSING": "\u2022 Data backup & disaster recovery",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": "",
+      "Unnamed: 4": ""
+    }
+  ],
+  "Query Pricing": [
+    {
+      "QUERY-BASED PRICING": "",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    },
+    {
+      "QUERY-BASED PRICING": "PER QUERY PRICING",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    },
+    {
+      "QUERY-BASED PRICING": "Query Type",
+      "Unnamed: 1": "Avg Tokens",
+      "Unnamed: 2": "Cost per Query",
+      "Unnamed: 3": "Use Case"
+    },
+    {
+      "QUERY-BASED PRICING": "Simple Query",
+      "Unnamed: 1": "500-2,000",
+      "Unnamed: 2": 0.8,
+      "Unnamed: 3": "What is SOP for..."
+    },
+    {
+      "QUERY-BASED PRICING": "Medium Query",
+      "Unnamed: 1": "2,000-8,000",
+      "Unnamed: 2": 3.2,
+      "Unnamed: 3": "Compare protocols"
+    },
+    {
+      "QUERY-BASED PRICING": "Complex Query",
+      "Unnamed: 1": "8,000-20,000",
+      "Unnamed: 2": 8,
+      "Unnamed: 3": "Compliance report"
+    },
+    {
+      "QUERY-BASED PRICING": "Deep Analysis",
+      "Unnamed: 1": "20,000-50,000",
+      "Unnamed: 2": 20,
+      "Unnamed: 3": "Cross-plant analysis"
+    },
+    {
+      "QUERY-BASED PRICING": "",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    },
+    {
+      "QUERY-BASED PRICING": "MONTHLY QUERY BUNDLES (PREPAID)",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    },
+    {
+      "QUERY-BASED PRICING": "Bundle Tier",
+      "Unnamed: 1": "Queries Included",
+      "Unnamed: 2": "Monthly Cost",
+      "Unnamed: 3": "Per Query Rate"
+    },
+    {
+      "QUERY-BASED PRICING": "Basic",
+      "Unnamed: 1": 5000,
+      "Unnamed: 2": 3000,
+      "Unnamed: 3": 0.6
+    },
+    {
+      "QUERY-BASED PRICING": "Standard",
+      "Unnamed: 1": 10000,
+      "Unnamed: 2": 12000,
+      "Unnamed: 3": 1.2
+    },
+    {
+      "QUERY-BASED PRICING": "Professional",
+      "Unnamed: 1": 25000,
+      "Unnamed: 2": 40000,
+      "Unnamed: 3": 1.6
+    },
+    {
+      "QUERY-BASED PRICING": "Enterprise",
+      "Unnamed: 1": "Unlimited*",
+      "Unnamed: 2": 120000,
+      "Unnamed: 3": ""
+    },
+    {
+      "QUERY-BASED PRICING": "",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    },
+    {
+      "QUERY-BASED PRICING": "USAGE CALCULATOR",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    },
+    {
+      "QUERY-BASED PRICING": "Selected Bundle",
+      "Unnamed: 1": "Standard",
+      "Unnamed: 2": "(Edit: Basic/Standard/Professional/Enterprise)",
+      "Unnamed: 3": ""
+    },
+    {
+      "QUERY-BASED PRICING": "Monthly Bundle Cost",
+      "Unnamed: 1": 12000,
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    },
+    {
+      "QUERY-BASED PRICING": "Annual Query Cost",
+      "Unnamed: 1": 144000,
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    },
+    {
+      "QUERY-BASED PRICING": "",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    },
+    {
+      "QUERY-BASED PRICING": "",
+      "Unnamed: 1": 144000,
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    }
+  ],
+  "TCO Calculator": [
+    {
+      "TOTAL COST OF OWNERSHIP (TCO) - 3 YEAR PROJECTION": "",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    },
+    {
+      "TOTAL COST OF OWNERSHIP (TCO) - 3 YEAR PROJECTION": "Cost Component",
+      "Unnamed: 1": "Year 1",
+      "Unnamed: 2": "Year 2",
+      "Unnamed: 3": "Year 3"
+    },
+    {
+      "TOTAL COST OF OWNERSHIP (TCO) - 3 YEAR PROJECTION": "One-Time Setup Cost",
+      "Unnamed: 1": 0,
+      "Unnamed: 2": 0,
+      "Unnamed: 3": 0
+    },
+    {
+      "TOTAL COST OF OWNERSHIP (TCO) - 3 YEAR PROJECTION": "Annual User Licensing",
+      "Unnamed: 1": 2580000,
+      "Unnamed: 2": 2580000,
+      "Unnamed: 3": 2580000
+    },
+    {
+      "TOTAL COST OF OWNERSHIP (TCO) - 3 YEAR PROJECTION": "Query Consumption",
+      "Unnamed: 1": 144000,
+      "Unnamed: 2": 144000,
+      "Unnamed: 3": 144000
+    },
+    {
+      "TOTAL COST OF OWNERSHIP (TCO) - 3 YEAR PROJECTION": "AMC & Support",
+      "Unnamed: 1": 0,
+      "Unnamed: 2": 0,
+      "Unnamed: 3": 0
+    },
+    {
+      "TOTAL COST OF OWNERSHIP (TCO) - 3 YEAR PROJECTION": "",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    },
+    {
+      "TOTAL COST OF OWNERSHIP (TCO) - 3 YEAR PROJECTION": "Sub-Total (Before GST)",
+      "Unnamed: 1": 2724000,
+      "Unnamed: 2": 2724000,
+      "Unnamed: 3": 2724000
+    },
+    {
+      "TOTAL COST OF OWNERSHIP (TCO) - 3 YEAR PROJECTION": "TOTAL ",
+      "Unnamed: 1": 2724000,
+      "Unnamed: 2": 2724000,
+      "Unnamed: 3": 2724000
+    },
+    {
+      "TOTAL COST OF OWNERSHIP (TCO) - 3 YEAR PROJECTION": "",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    },
+    {
+      "TOTAL COST OF OWNERSHIP (TCO) - 3 YEAR PROJECTION": "3-YEAR TOTAL COST",
+      "Unnamed: 1": 8172000,
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    },
+    {
+      "TOTAL COST OF OWNERSHIP (TCO) - 3 YEAR PROJECTION": "",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    },
+    {
+      "TOTAL COST OF OWNERSHIP (TCO) - 3 YEAR PROJECTION": "",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    },
+    {
+      "TOTAL COST OF OWNERSHIP (TCO) - 3 YEAR PROJECTION": "MULTI-YEAR DISCOUNT CALCULATOR",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    },
+    {
+      "TOTAL COST OF OWNERSHIP (TCO) - 3 YEAR PROJECTION": "Contract Duration (Years)",
+      "Unnamed: 1": 3,
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    },
+    {
+      "TOTAL COST OF OWNERSHIP (TCO) - 3 YEAR PROJECTION": "Discount on Setup (%)",
+      "Unnamed: 1": 0.05,
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    },
+    {
+      "TOTAL COST OF OWNERSHIP (TCO) - 3 YEAR PROJECTION": "Discount on Annual Fees (%)",
+      "Unnamed: 1": 0.03,
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    },
+    {
+      "TOTAL COST OF OWNERSHIP (TCO) - 3 YEAR PROJECTION": "",
+      "Unnamed: 1": "",
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    },
+    {
+      "TOTAL COST OF OWNERSHIP (TCO) - 3 YEAR PROJECTION": "Standard 3-Year Cost",
+      "Unnamed: 1": 8172000,
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    },
+    {
+      "TOTAL COST OF OWNERSHIP (TCO) - 3 YEAR PROJECTION": "Setup Discount Savings",
+      "Unnamed: 1": 110000,
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    },
+    {
+      "TOTAL COST OF OWNERSHIP (TCO) - 3 YEAR PROJECTION": "Annual Fees Discount Savings",
+      "Unnamed: 1": 232200,
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    },
+    {
+      "TOTAL COST OF OWNERSHIP (TCO) - 3 YEAR PROJECTION": "Total Savings",
+      "Unnamed: 1": 342200,
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    },
+    {
+      "TOTAL COST OF OWNERSHIP (TCO) - 3 YEAR PROJECTION": "Discounted 3-Year Cost",
+      "Unnamed: 1": 7829800,
+      "Unnamed: 2": "",
+      "Unnamed: 3": ""
+    }
+  ],
+  "Optional Add-ons": [
+    {
+      "OPTIONAL ADD-ONS": "",
+      "Unnamed: 1": "",
+      "Unnamed: 2": ""
+    },
+    {
+      "OPTIONAL ADD-ONS": "Add-On Service",
+      "Unnamed: 1": "Cost (INR)",
+      "Unnamed: 2": "Type"
+    },
+    {
+      "OPTIONAL ADD-ONS": "Custom Model Fine-Tuning",
+      "Unnamed: 1": 450000,
+      "Unnamed: 2": "One-time"
+    },
+    {
+      "OPTIONAL ADD-ONS": "Multi-Language Support (Hindi + 2)",
+      "Unnamed: 1": 200000,
+      "Unnamed: 2": "One-time"
+    },
+    {
+      "OPTIONAL ADD-ONS": "Advanced Analytics Dashboard",
+      "Unnamed: 1": 150000,
+      "Unnamed: 2": "Annual"
+    },
+    {
+      "OPTIONAL ADD-ONS": "Dedicated Account Manager",
+      "Unnamed: 1": 300000,
+      "Unnamed: 2": "Annual"
+    },
+    {
+      "OPTIONAL ADD-ONS": "99.9% SLA Upgrade",
+      "Unnamed: 1": 200000,
+      "Unnamed: 2": "Annual"
+    },
+    {
+      "OPTIONAL ADD-ONS": "On-Premise Deployment Setup",
+      "Unnamed: 1": 800000,
+      "Unnamed: 2": "One-time"
+    },
+    {
+      "OPTIONAL ADD-ONS": "On-Premise Annual Support",
+      "Unnamed: 1": 300000,
+      "Unnamed: 2": "Annual"
+    },
+    {
+      "OPTIONAL ADD-ONS": "WhatsApp Bot Integration",
+      "Unnamed: 1": 150000,
+      "Unnamed: 2": "One-time"
+    },
+    {
+      "OPTIONAL ADD-ONS": "Mobile App (iOS/Android)",
+      "Unnamed: 1": 350000,
+      "Unnamed: 2": "One-time"
+    },
+    {
+      "OPTIONAL ADD-ONS": "",
+      "Unnamed: 1": "",
+      "Unnamed: 2": ""
+    },
+    {
+      "OPTIONAL ADD-ONS": "SELECT ADD-ONS",
+      "Unnamed: 1": "",
+      "Unnamed: 2": ""
+    },
+    {
+      "OPTIONAL ADD-ONS": "Add-on Name",
+      "Unnamed: 1": "Select (YES/NO)",
+      "Unnamed: 2": "Cost"
+    },
+    {
+      "OPTIONAL ADD-ONS": "",
+      "Unnamed: 1": "NO",
+      "Unnamed: 2": 0
+    },
+    {
+      "OPTIONAL ADD-ONS": "",
+      "Unnamed: 1": "NO",
+      "Unnamed: 2": 0
+    },
+    {
+      "OPTIONAL ADD-ONS": "",
+      "Unnamed: 1": "NO",
+      "Unnamed: 2": 0
+    },
+    {
+      "OPTIONAL ADD-ONS": "",
+      "Unnamed: 1": "NO",
+      "Unnamed: 2": 0
+    },
+    {
+      "OPTIONAL ADD-ONS": "",
+      "Unnamed: 1": "NO",
+      "Unnamed: 2": 0
+    },
+    {
+      "OPTIONAL ADD-ONS": "",
+      "Unnamed: 1": "NO",
+      "Unnamed: 2": 0
+    },
+    {
+      "OPTIONAL ADD-ONS": "",
+      "Unnamed: 1": "NO",
+      "Unnamed: 2": 0
+    },
+    {
+      "OPTIONAL ADD-ONS": "",
+      "Unnamed: 1": "NO",
+      "Unnamed: 2": 0
+    },
+    {
+      "OPTIONAL ADD-ONS": "",
+      "Unnamed: 1": "NO",
+      "Unnamed: 2": 0
+    },
+    {
+      "OPTIONAL ADD-ONS": "TOTAL SELECTED ADD-ONS",
+      "Unnamed: 1": "",
+      "Unnamed: 2": 0
+    }
+  ],
+  "ROI Analysis": [
+    {
+      "ROI ANALYSIS": "",
+      "Unnamed: 1": "",
+      "Unnamed: 2": ""
+    },
+    {
+      "ROI ANALYSIS": "QUANTIFIABLE ANNUAL BENEFITS",
+      "Unnamed: 1": "",
+      "Unnamed: 2": ""
+    },
+    {
+      "ROI ANALYSIS": "Benefit Category",
+      "Unnamed: 1": "Annual Savings (INR)",
+      "Unnamed: 2": "Calculation Basis"
+    },
+    {
+      "ROI ANALYSIS": "Reduced Documentation Search Time",
+      "Unnamed: 1": 17500000,
+      "Unnamed: 2": "2hrs/day \u00d7 100 users \u00d7 \u20b9500/hr \u00d7 70% reduction"
+    },
+    {
+      "ROI ANALYSIS": "Faster Compliance Reporting",
+      "Unnamed: 1": 800000,
+      "Unnamed: 2": "50 reports \u00d7 40hrs \u00d7 \u20b9800/hr \u00d7 50% reduction"
+    },
+    {
+      "ROI ANALYSIS": "Reduced Training Costs",
+      "Unnamed: 1": 384000,
+      "Unnamed: 2": "80hrs \u00d7 \u20b9600/hr \u00d7 20 hires \u00d7 40% reduction"
+    },
+    {
+      "ROI ANALYSIS": "Error Reduction in SOP Adherence",
+      "Unnamed: 1": 1200000,
+      "Unnamed: 2": "Quality incidents \u00d7 rework \u00d7 30% reduction"
+    },
+    {
+      "ROI ANALYSIS": "Cross-Plant Knowledge Sharing",
+      "Unnamed: 1": 600000,
+      "Unnamed: 2": "Travel + time \u00d7 60% reduction"
+    },
+    {
+      "ROI ANALYSIS": "TOTAL ANNUAL BENEFITS",
+      "Unnamed: 1": 20484000,
+      "Unnamed: 2": ""
+    },
+    {
+      "ROI ANALYSIS": "",
+      "Unnamed: 1": "",
+      "Unnamed: 2": ""
+    },
+    {
+      "ROI ANALYSIS": "",
+      "Unnamed: 1": "",
+      "Unnamed: 2": ""
+    },
+    {
+      "ROI ANALYSIS": "ROI METRICS",
+      "Unnamed: 1": "",
+      "Unnamed: 2": ""
+    },
+    {
+      "ROI ANALYSIS": "Year 1 Total Cost",
+      "Unnamed: 1": 4924000,
+      "Unnamed: 2": ""
+    },
+    {
+      "ROI ANALYSIS": "Annual Benefits",
+      "Unnamed: 1": 20484000,
+      "Unnamed: 2": ""
+    },
+    {
+      "ROI ANALYSIS": "Net Benefit (Year 1)",
+      "Unnamed: 1": 15560000,
+      "Unnamed: 2": ""
+    },
+    {
+      "ROI ANALYSIS": "Break-Even Period (Months)",
+      "Unnamed: 1": 2.8845928529584066,
+      "Unnamed: 2": ""
+    },
+    {
+      "ROI ANALYSIS": "ROI % (Year 1)",
+      "Unnamed: 1": 3.1600324939073925,
+      "Unnamed: 2": ""
+    },
+    {
+      "ROI ANALYSIS": "Payback Period",
+      "Unnamed: 1": "Within Year 1",
+      "Unnamed: 2": ""
+    },
+    {
+      "ROI ANALYSIS": "",
+      "Unnamed: 1": "",
+      "Unnamed: 2": ""
+    },
+    {
+      "ROI ANALYSIS": "3-YEAR CUMULATIVE ROI",
+      "Unnamed: 1": "",
+      "Unnamed: 2": ""
+    },
+    {
+      "ROI ANALYSIS": "3-Year Total Cost",
+      "Unnamed: 1": 8172000,
+      "Unnamed: 2": ""
+    },
+    {
+      "ROI ANALYSIS": "3-Year Total Benefits",
+      "Unnamed: 1": 61452000,
+      "Unnamed: 2": ""
+    },
+    {
+      "ROI ANALYSIS": "Net 3-Year Benefit",
+      "Unnamed: 1": 53280000,
+      "Unnamed: 2": ""
+    },
+    {
+      "ROI ANALYSIS": "3-Year ROI %",
+      "Unnamed: 1": 6.5198237885462555,
+      "Unnamed: 2": ""
+    }
+  ]
+}

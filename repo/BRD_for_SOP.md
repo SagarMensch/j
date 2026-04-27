@@ -1,0 +1,271 @@
+<!-- Page 1 -->
+JUBILANT
+INGREVIA
+IUBILANT
+INGREVIA
+AI-POWEREDINFORMATIONASSISTANT&
+TRAININGENGINE
+
+
+---
+<!-- Page 2 -->
+JUBILANT
+INGREVIA
+ExecutiveSummary
+TheAl-PoweredPlantKnowledgeandTrainingCompanionisdesignedto addressa critical
+operatorstoefficientlyaccess,understand,and applyproceduralknowledgestored across
+enterprisedocumentrepositories.Standard OperatingProcedures(SOPs),Standard
+Maintenance Processes (SMPs),and Work Instruction Documents (WiDs) are typically
+maintainedinSharePoint,distributedacrossmultiplelibraries,andwritteninhighlytechnical
+peryear—theirvolume,complexity,andfragmentedstoragemakeit difficultforoperatorsto
+critical situations.
+Thissolutiondelivers anintelligent,secure,andscalableAlplatformthat transformsexisting
+SharePoint-baseddocumentationintoaninteractiveknowledgeandlearningecosystem.
+LeveragingRetrieval-Augmented Generation(RAG)and GenerativeAlonAWS,theplatform
+enablesoperatorstoretrieveaccurate,context-awareanswerstonatural-languagequeries
+directlyfromapprovedSOP,SMP,andWIDdocuments.Insteadofmanuallynavigatingfolders
+role-relevantresponsesthatarefullygroundedinauthoritativedocuments,withclearcitations
+andtraceabilitytotheexactsourcesections.
+EnablementBot tailoredforplant operations.Thisbotsupportsbothnewand experienced
+instructions,andsurfaceskeyprocedural updateswheneverrevisionsoccur.Evenwith
+infrequentdocumentchanges,theplatformensuresthatoperatorsarealwaysalignedwiththe
+mostcurrent approvedversionswithoutrelyingonmanual disseminationor classroom-based
+retraining.
+Akeycapabilityofthetrainingbotisavoice-to-voiceAlassistant,enablinghands-free,
+conversationallearningandoperationalsupportontheplantfloor.Operatorscaninteractwith
+the systemusing speechto ask questions,request clarifications,orwalkthroughSOP,SMP,
+andWiDsteps,andreceivespokenresponsesgenerateddirectlyfromvalidateddocuments.
+Thiscapabilityisespeciallyvaluableinenvironmentswherescreenaccessislimitedorwhere
+operatorsmustremainfocusedonequipmentandsafety.Thevoiceassistantalsosupports
+interactivelearningsessions,allowingoperatorsto askfollow-upquestions during training and
+reinforcingunderstandingthroughcontextualQ&A.
+Builtwithenterprise-gradesecurity,monitoring,andnon-functional controls—including
+availability,responsetimeSLAs,dataprotection,reliability,and compliancereadiness—the
+Document(BRD)outlinesthebusinessobjectives,scope,functionalandnon-functional
+requirements,architectureoverview，dataingestionandretrievalflows，userexperience
+reducesoperationalrisk,andenhancesproductivityacrossplantoperations.
+
+
+---
+<!-- Page 3 -->
+JUBILANT
+INGREVIA
+AbbreviationsandDescription
+Description
+Abbreviation
+Full Form
+(in this document's context)
+Techniques enabling the system tounderstand,
+AI
+Artificial Intelligence
+process, and generate human-like output.
+Cloudplatformusedtohostandrunthe
+AWS
+AmazonWebServices
+solution.
+ApplicationProgramming
+Interface throughwhichthefrontend
+API
+Interface
+communicateswithbackendservices.
+Interactionpatternwhere users askquestions
+Q&A
+Question and Answer
+and receive answers from the system.
+Thevisual interface(web)thatusersinteract
+UI
+User Interface
+with.
+Overallusabilityandexperienceofusers
+UX
+User Experience
+interactingwiththesystem.
+Al model usedtogeneratesummaries and
+LLM
+Large Language Model
+answersfromretrievedcontent.
+Retrieval-Augmented
+Approachthatcombinesdocumentretrieval
+RAG
+Generation
+withLLM-basedanswergeneration.
+Authenticationmethod allowinguserstolog in
+SSO
+Single Sign-On
+with one set of credentials.
+SecurityAssertionMarkup
+Standardusedforexchangingauthentication
+SAML
+Language
+and authorization data forSSO.
+Documents that define standardized, approved
+Standard Operating
+SOP
+steps to perform routine operations safely and
+Procedures
+consistently.
+Documentsthatoutlinescheduledand
+StandardMaintenance
+SMP
+correctivemaintenance activitiesrequired to
+Processes
+ensureequipmentreliabilityanduptime
+Detailed,task-levelinstructionsthatguide
+Work Instruction
+WID
+operators onhow toperformspecific activities
+Documents
+or use equipment correctly
+
+
+---
+<!-- Page 4 -->
+JUBILANT
+INGREVIA
+WebaddressusedtoaccessSharePointand
+URL
+UniformResourceLocator
+andotherresources.
+Unique value used to identify a user or
+ID
+Identifier
+resource (e.g. user ID).
+Protected Health
+Health-related informationthatcanidentifyan
+PHI
+Information
+individual.
+PersonallyIdentifiable
+Any data thatcanbeused toidentifya specific
+PII
+Information
+person.
+HyperText Transfer
+Secure protocol used for encrypted
+HTTPS
+Protocol Secure
+communicationbetweenclientandserver.
+Cryptographic protocol providing secure
+TLS
+TransportLayerSecurity
+communicationovera network.
+Continuous Integration/
+Automated pipeline forbuilding,testing,and
+CI/CD
+Continuous Delivery (or
+deploying code.
+Deployment)
+
+
+---
+<!-- Page 5 -->
+JUBILANT
+INGREVIA
+1.Background
+PlantoperatorsrelyonStandardOperatingProcedures(SOPs),StandardMaintenance
+Processes(SMPs),and WorkInstructionDocuments(WiDs)toperform daily activities
+accuratelyandsafely.ThesedocumentsarestoredinSharePointrepositoriesandcontain
+detailedtechnicalcontentrequiredforoperations.
+Despitetheirimportance,thecurrentexperienceofaccessingandapplyinginformationis
+inefficient.Operatorsmustmanuallysearchacrossmultiplelibrariesandfolders,oftenunder
+timepressure.Thisresultsinslowerdecision-making,traininginefficiencies,andoperational
+riskforindustrialenvironments.
+2.BusinessProblem
+documentationaccessmodelpresentslimitations:
+1.SlowretrievalofinformationfromSharePoint
+2.High cognitiveload dueto dense technical language
+3.Lackof guided trainingbeyond classroomlearning
+4.Limited support forvoice-basedlearning onplant floors
+5.Collectively,thesefactorsreduceproductivity,increase trainingoverhead,and mayincrease
+operational risk.
+3.Proposed Solution (High-Level)
+enginedesignedtosupportplantoperatorsintheirday-to-dayoperationalactivitiesandlearning
+needs.
+Thesolutionwill transformexistingoperational documentsintoaninteractive andguided
+experience,enablingoperatorstoaccessaccurateinformationquickly,learnprocedures
+effectively,and perform tasks more safely.
+·Askquestionsinnaturallanguageandreceiveaccurateanswers
+Operatorswillbe ableto askquestionsinsimple,everydaylanguageinstead of
+manuallysearchingthroughdocuments.Thesystemwillrespondwithclear,
+easy-to-understand answersthat arederivedonlyfrom approvedoperational
+documents.
+Learnproceduresthroughguidedtrainingmodules
+experiencedstaff.
+Usehands-freevoiceinteractionsinsafety-criticalenvironments
+The solutionwill supportvoice-based interactions,allowing operatorsto ask
+questionsandreceiveguidancewithoutneedingtouseakeyboardorscreen—
+
+
+---
+<!-- Page 6 -->
+JUBILANT
+INGREVIA
+s
+safety.
+Accessvalidatedproceduralknowledgefromapprovedsources
+oAll informationandguidanceprovidedbythesystemwill bebasedexclusivelyon
+approved SOP,SMP,and WID documents stored in SharePoint,ensuring
+accuracy,consistency,andcompliance.
+4.BusinessObjectives
+Thesolutionaimsto:
+Reducethetime and effortrequiredforoperatorstolocate,understand,andapply
+informationfromSOPs,SMPs,andWIDsduringdailyoperations.
+Enablefasterandmoreeffectiveonboardingofnewoperatorsthroughguided,self-
+availability.
+Ensure operators alwaysreference themost current and approvedprocedures,reducing
+therisk of
+Supportongoingskilldevelopmentandknowledgereinforcementwithoutdisrupting
+operationsorrequiringoperatorstoleavetheplantfloor.
+Improveoperatorconfidence andpreparednessbyprovidingreal-time,hands-free
+accesstoproceduralguidanceandtrainingsupport.
+5.ScopeofWork
+5.1 In-Scope
+The project includes:
+Centralizedaccesstooperationaldocuments
+oProvide a single point of access to SOP,SMP,and WID documents currently
+storedinSharePoint.
+Natural-languagequestionandanswercapability
+oAllowoperatorsto ask questions inplainlanguage and receive accurate,
+document-based responses.
+Guidedtrainingmodules
+oDeliver structured,step-by-step training experiences derived from operational
+procedures to support onboarding and refresher learning.
+Multi-language interaction support
+Enable interactionsinEnglish,Hindi,andHinglishtobettersupportworkforce
+language preferences.
+Hands-freevoiceassistance
+oProvidevoice-to-voiceinteractionso operators canreceiveguidancewithout
+manual input, improving safety and easeof use inoperational environments.
+Business-level reporting and insights
+
+
+---
+<!-- Page 7 -->
+JUBILANT
+INGREVIA
+Offervisibilityinto training completion,usagepatterns,and assessment
+outcomestosupport workforcereadinessmonitoring.
+Web-basedoperatorinterface
+Deliverthesolutionthroughabrowser-basedinterfaceaccessiblefromapproved
+workstations.
+6.Key Business Capabilities
+Thesolutionwill providethefollowingbusiness capabilities:
+InformationLookup:OperatorscanquicklyretrieveSOP/SMP/WIDanswers.
+Training&Enablement:Guided trainingflowsforprocedures.
+VoiceInteraction(Hands-FreeMode):Operatorscanqueryandlearnusing speech.
+Traceability&Compliance:Allanswerslinkedbacktoapproveddocumentation.
+Assessment&ReadinessTracking:Post-trainingassessmentforreadiness
+validation.
+8.SuccessCriteria
+Operatorsgetaccurateinformationgroundedinofficialdocuments.
+Trainingtimefornewoperatorsdecreasesmeasurably.
+Operatorsdemonstrateimprovedreadinessthroughassessments.
+Theplatformisadopted andusedreliablyduringthepilot.
+Businessstakeholdersapprovefunctionalperformanceandcompliancealignment.
+9.FutureScope
+Additionaldatasources-ExtendbeyondSharePoint.
+Multi-languagesupportapartfromHindi,EnglishandHinglish-Addsupportformore
+languages(regionalandinternational)forbothquestionsandanswers.
+SolutiontosupportmultipleGeolocations.
+UI/UXchangesaspertheneed.
+
