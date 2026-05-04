@@ -198,25 +198,25 @@ export default function AdminHome() {
               <KpiCard
                 title="Mandatory Completion"
                 value={`${Math.round(dashboard.stats.mandatory_completion_rate || 0)}%`}
-                subtitle={`${dashboard.stats.mandatory_completed} of ${dashboard.stats.mandatory_total} modules`}
+                //subtitle={`${dashboard.stats.mandatory_completed} of ${dashboard.stats.mandatory_total} modules`}
                 color="text-primary"
               />
               <KpiCard
                 title="Approved Documents"
                 value={retrievalStatus?.postgres?.documents || 0}
-                subtitle={`${retrievalStatus?.postgres?.embedded_chunks || 0} embedded chunks`}
+                //subtitle={`${retrievalStatus?.postgres?.embedded_chunks || 0} embedded chunks`}
                 color="text-foreground"
               />
               <KpiCard
                 title="Operators Ready"
                 value={readyOperators}
-                subtitle={`${users.filter((item) => item.role === 'operator').length} operators in system`}
+                //subtitle={`${users.filter((item) => item.role === 'operator').length} operators in system`}
                 color="text-primary"
               />
               <KpiCard
                 title="Retrieval Events"
                 value={retrievalStatus?.postgres?.retrieval_events || 0}
-                subtitle={`${dashboard.stats.in_progress} modules in progress`}
+                //subtitle={`${dashboard.stats.in_progress} modules in progress`}
                 color="text-secondary"
               />
             </div>

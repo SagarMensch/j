@@ -710,7 +710,7 @@ const COPY: Record<AppLanguage, LookupCopy> = {
     subtitle:
       "Type or speak your question. Response is grounded in approved documents.",
     placeholder: "Ask procedure, safety step, machine operation...",
-    followUpPlaceholder: "Ask follow-up...",
+    followUpPlaceholder: "Ask...",
     askButton: "Ask",
     voiceStartAction: "Start voice",
     voiceStopRecordingAction: "Stop and send",

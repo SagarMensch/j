@@ -15,6 +15,7 @@ import {
 import { apiClient, API_BASE_URL } from "@/lib/api";
 import { AppLanguage, useAuth } from "@/lib/auth-context";
 import { trackEvent } from "@/lib/telemetry";
+import { PdfViewer } from "@/components/ui/pdf-viewer";
 
 type ReaderCopy = {
   title: string;
@@ -342,6 +343,7 @@ export default function OperatorReaderPage() {
   const [pagePayload, setPagePayload] = useState<PagePayload | null>(null);
   const [isPageLoading, setIsPageLoading] = useState(false);
   const [pageError, setPageError] = useState("");
+  const [pdfLoadFailed, setPdfLoadFailed] = useState(false);
 
   const [question, setQuestion] = useState("");
   const [isQuerying, setIsQuerying] = useState(false);
@@ -370,6 +372,14 @@ export default function OperatorReaderPage() {
     documents.find((doc) => doc.revision_id === revisionId) || null;
   const totalPages = Number(documentMeta?.pages || 0);
   const pageImageUrl = normalizeApiAssetUrl(pagePayload?.page.image_url);
+  const activePdfUrl = (!pdfLoadFailed && !pagePayload?.is_chunk_fallback) ? `${API_BASE_URL}/api/documents/${revisionId}/pdf` : null;
+  const pageText =
+    pagePayload?.page.raw_text?.trim() ||
+    pagePayload?.blocks
+      ?.map((block) => block.text?.trim())
+      .filter((text): text is string => Boolean(text))
+      .join("\n\n") ||
+    "";
   const isListening = voiceState === "recording";
   const isVoiceProcessing = voiceState === "processing";
   const isVoicePlaying = voiceState === "playing";
@@ -623,6 +633,7 @@ export default function OperatorReaderPage() {
     setConversationId(initialConversationId || null);
     setMessages([]);
     setActiveCitation(null);
+    setPdfLoadFailed(false);
   }, [revisionId]);
 
   useEffect(() => {
@@ -1156,13 +1167,15 @@ export default function OperatorReaderPage() {
                 <div className="rounded-[12px] border border-danger/25 bg-danger-light p-3 text-sm text-danger">
                   {pageError}
                 </div>
-              ) : pageImageUrl ? (
+              ) : activePdfUrl ? (
                 <div className="overflow-hidden rounded-[12px] border border-border bg-white">
-                  <img
-                    src={pageImageUrl}
-                    alt={`${headingCode} page ${pageNumber}`}
-                    className="block h-auto w-full"
-                  />
+                  <PdfViewer pdfUrl={activePdfUrl} currentPage={pageNumber} fallbackImageUrl={pageImageUrl} onLoadError={() => setPdfLoadFailed(true)} />
+                </div>
+              ) : pageText ? (
+                <div className="rounded-[12px] border border-border bg-white p-4">
+                  <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-6 text-foreground">
+                    {pageText}
+                  </pre>
                 </div>
               ) : (
                 <div className="rounded-[12px] border border-border bg-white p-4 text-sm text-muted">

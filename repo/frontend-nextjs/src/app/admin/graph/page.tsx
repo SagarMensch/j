@@ -614,11 +614,11 @@ export default function AdminGraphPage() {
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Badge variant={payload?.source === "neo4j" ? "success" : "warning"}>
+              {/*<Badge variant={payload?.source === "neo4j" ? "success" : "warning"}>
                 {payload?.source === "neo4j"
                   ? "Neo4j Graph Live"
                   : "Fallback Graph Active"}
-              </Badge>
+              </Badge>*/}
               <Badge variant="info">Interactive Node Navigation</Badge>
             </div>
           </div>
@@ -648,9 +648,9 @@ export default function AdminGraphPage() {
                   <Badge variant="default">
                     {payload.summary.edge_count} relationships
                   </Badge>
-                  <Badge variant="info">
+                  {/*<Badge variant="info">
                     Status: {payload.status}
-                  </Badge>
+                  </Badge>*/}
                 </div>
               </div>
               <div

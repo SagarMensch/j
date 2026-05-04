@@ -3959,6 +3959,47 @@ async def document_page_image(revision_id: str, page_number: int):
     return FileResponse(image_path)
 
 
+@app.get("/api/documents/{revision_id}/pdf")
+async def document_pdf(revision_id: str):
+    with engine.connect() as conn:
+        row = conn.execute(
+            text(
+                """
+                SELECT dr.file_path, d.source_filename
+                FROM document_revisions dr
+                JOIN documents d ON d.id = dr.document_id
+                WHERE dr.id = CAST(:revision_id AS uuid)
+                """
+            ),
+            {"revision_id": revision_id},
+        ).mappings().first()
+
+    if not row:
+        raise HTTPException(status_code=404, detail=f"No revision found with id: {revision_id}")
+
+    file_path = row.get("file_path")
+    source_filename = row.get("source_filename") or "document.pdf"
+
+    if not file_path:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Original PDF file path not recorded for revision. Document may have been ingested without preserving the original file."
+        )
+
+    pdf_path = Path(file_path)
+    if not pdf_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Original PDF file not found on disk at: {file_path}"
+        )
+
+    return FileResponse(
+        pdf_path,
+        media_type="application/pdf",
+        filename=source_filename,
+    )
+
+
 @app.get("/api/assessments/{assessment_id}")
 async def assessment_details(assessment_id: str, user_id: str):
     with engine.connect() as conn:
