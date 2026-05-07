@@ -65,3 +65,69 @@ export const apiClient = {
     return payload;
   },
 };
+
+type SseHandlers = {
+  onEvent: (event: string, payload: unknown) => void;
+};
+
+export async function postJsonSse(
+  endpoint: string,
+  body: unknown,
+  handlers: SseHandlers,
+) {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}${endpoint}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (error) {
+    throw new Error(buildNetworkErrorMessage(endpoint, error));
+  }
+
+  if (!res.ok || !res.body) {
+    const payload = await parseJsonSafely(res);
+    throw new Error(buildErrorMessage(res, payload));
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    let boundary = buffer.indexOf("\n\n");
+
+    while (boundary >= 0) {
+      const rawEvent = buffer.slice(0, boundary).trim();
+      buffer = buffer.slice(boundary + 2);
+
+      if (rawEvent) {
+        let eventName = "message";
+        const dataLines: string[] = [];
+
+        for (const line of rawEvent.split("\n")) {
+          if (line.startsWith("event:")) {
+            eventName = line.slice(6).trim();
+          } else if (line.startsWith("data:")) {
+            dataLines.push(line.slice(5).trim());
+          }
+        }
+
+        const dataText = dataLines.join("\n");
+        if (dataText) {
+          handlers.onEvent(eventName, JSON.parse(dataText));
+        }
+      }
+
+      boundary = buffer.indexOf("\n\n");
+    }
+  }
+}

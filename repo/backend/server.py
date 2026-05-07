@@ -13,7 +13,7 @@ from typing import Any
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -174,6 +174,33 @@ class QueryEvidence(BaseModel):
 
 class QueryResponse(BaseModel):
     answer: str
+    confidence: float
+    latency_ms: int
+    retrieval_event_id: str | None = None
+    conversation_id: str | None = None
+    evidence: list[QueryEvidence]
+    diagnostics: dict[str, Any]
+
+
+class OperationGuideRequest(BaseModel):
+    query: str = Field(min_length=2)
+    language: str = "en"
+    role: str | None = "operator"
+    user_id: str | None = None
+    conversation_id: str | None = None
+    intent: str | None = None
+    top_k: int = 6
+
+
+class OperationGuideResponse(BaseModel):
+    answer: str
+    mode: str
+    next_actions: list[str] = []
+    state: dict[str, Any] = {}
+    state_label: str | None = None
+    step_index: int | None = None
+    requires_supervisor: bool = False
+    completion_record_id: str | None = None
     confidence: float
     latency_ms: int
     retrieval_event_id: str | None = None
@@ -574,6 +601,8 @@ def _normalize_chat_scope(scope: str | None) -> str:
     normalized = (scope or "general").strip().lower()
     if normalized in {"reader", "doc_reader", "reading"}:
         return "reader"
+    if normalized in {"guided", "guide", "operation", "operations", "run_guide"}:
+        return "guided"
     return "general"
 
 
@@ -590,13 +619,15 @@ def _chat_storage_tables(chat_scope: str) -> tuple[str, str]:
     normalized_scope = _normalize_chat_scope(chat_scope)
     if normalized_scope == "reader":
         return "chat_reader_conversations", "chat_reader_messages"
+    if normalized_scope == "guided":
+        return "chat_guided_conversations", "chat_guided_messages"
     return "chat_conversations", "chat_messages"
 
 
 def _legacy_general_scope_filter(chat_scope: str) -> str:
     if _normalize_chat_scope(chat_scope) == "general":
-        # Prevent legacy reader rows from showing up in general chat lists/lookups.
-        return "AND COALESCE(c.metadata->>'scope', 'general') <> 'reader'"
+        # Prevent legacy scoped rows from showing up in general chat lists/lookups.
+        return "AND COALESCE(c.metadata->>'scope', 'general') NOT IN ('reader', 'guided')"
     return ""
 
 
@@ -729,6 +760,20 @@ def _detect_chat_scope_for_conversation(
     conversation_id: str,
     user_id: str,
 ) -> str | None:
+    guided_row = conn.execute(
+        text(
+            """
+            SELECT 1
+            FROM chat_guided_conversations c
+            WHERE c.id = CAST(:conversation_id AS uuid)
+              AND c.user_id = CAST(:user_id AS uuid)
+            """
+        ),
+        {"conversation_id": conversation_id, "user_id": user_id},
+    ).first()
+    if guided_row:
+        return "guided"
+
     reader_row = conn.execute(
         text(
             """
@@ -750,7 +795,7 @@ def _detect_chat_scope_for_conversation(
             FROM chat_conversations c
             WHERE c.id = CAST(:conversation_id AS uuid)
               AND c.user_id = CAST(:user_id AS uuid)
-              AND COALESCE(c.metadata->>'scope', 'general') <> 'reader'
+              AND COALESCE(c.metadata->>'scope', 'general') NOT IN ('reader', 'guided')
             """
         ),
         {"conversation_id": conversation_id, "user_id": user_id},
@@ -772,6 +817,21 @@ def _detect_chat_scope_for_conversation(
     ).first()
     if legacy_reader_row:
         return "reader"
+
+    legacy_guided_row = conn.execute(
+        text(
+            """
+            SELECT 1
+            FROM chat_conversations c
+            WHERE c.id = CAST(:conversation_id AS uuid)
+              AND c.user_id = CAST(:user_id AS uuid)
+              AND COALESCE(c.metadata->>'scope', 'general') = 'guided'
+            """
+        ),
+        {"conversation_id": conversation_id, "user_id": user_id},
+    ).first()
+    if legacy_guided_row:
+        return "guided"
     return None
 
 
@@ -959,6 +1019,432 @@ def _append_chat_message(
     payload["created_at"] = _iso(payload.get("created_at"))
     payload["citations"] = payload.get("citations") or []
     return payload
+
+
+def _get_conversation_metadata(
+    conn,
+    conversation_id: str,
+    user_id: str,
+    *,
+    chat_scope: str,
+) -> dict[str, Any]:
+    normalized_scope = _normalize_chat_scope(chat_scope)
+    conversation_table, _ = _chat_storage_tables(normalized_scope)
+    row = conn.execute(
+        text(
+            f"""
+            SELECT metadata
+            FROM {conversation_table}
+            WHERE id = CAST(:conversation_id AS uuid)
+              AND user_id = CAST(:user_id AS uuid)
+            """
+        ),
+        {"conversation_id": conversation_id, "user_id": user_id},
+    ).mappings().first()
+    if not row:
+        return {}
+    metadata = row.get("metadata") or {}
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except Exception:
+            metadata = {}
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _merge_conversation_metadata(
+    conn,
+    conversation_id: str,
+    metadata_patch: dict[str, Any],
+    *,
+    chat_scope: str,
+) -> None:
+    normalized_scope = _normalize_chat_scope(chat_scope)
+    conversation_table, _ = _chat_storage_tables(normalized_scope)
+    conn.execute(
+        text(
+            f"""
+            UPDATE {conversation_table}
+            SET
+                metadata = COALESCE(metadata, '{{}}'::jsonb) || CAST(:metadata_patch AS jsonb),
+                updated_at = now()
+            WHERE id = CAST(:conversation_id AS uuid)
+            """
+        ),
+        {
+            "conversation_id": conversation_id,
+            "metadata_patch": json.dumps(metadata_patch),
+        },
+    )
+
+
+def _json_dumps(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, default=str)
+
+
+def _compact_text(value: Any, *, max_chars: int = 96) -> str:
+    text_value = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text_value) <= max_chars:
+        return text_value
+    return text_value[: max_chars - 3].rstrip() + "..."
+
+
+def _unique_list(values: list[Any], *, max_items: int = 12) -> list[str]:
+    seen: set[str] = set()
+    output: list[str] = []
+    for value in values:
+        item = _compact_text(value, max_chars=80)
+        if not item:
+            continue
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(item)
+        if len(output) >= max_items:
+            break
+    return output
+
+
+def _record_worker_activity(
+    conn,
+    *,
+    user_id: str | None,
+    event_type: str,
+    title: str,
+    details: dict[str, Any] | None = None,
+    severity: str = "info",
+    event_source: str = "system",
+) -> str | None:
+    if not user_id:
+        return None
+    return conn.execute(
+        text(
+            """
+            INSERT INTO worker_activity_events (
+                user_id,
+                event_type,
+                event_source,
+                severity,
+                title,
+                details
+            )
+            VALUES (
+                CAST(:user_id AS uuid),
+                :event_type,
+                :event_source,
+                :severity,
+                :title,
+                CAST(:details AS jsonb)
+            )
+            RETURNING id::text
+            """
+        ),
+        {
+            "user_id": user_id,
+            "event_type": event_type,
+            "event_source": event_source,
+            "severity": severity,
+            "title": _compact_text(title, max_chars=140) or "Worker activity",
+            "details": _json_dumps(details or {}),
+        },
+    ).scalar()
+
+
+def _upsert_worker_memory(
+    conn,
+    *,
+    user_id: str | None,
+    language: str | None = None,
+    equipment: str | None = None,
+    sop_code: str | None = None,
+    skill_tags: list[Any] | None = None,
+    risk_flags: list[Any] | None = None,
+) -> None:
+    if not user_id:
+        return
+    tags = _unique_list(skill_tags or [])
+    risks = _unique_list(risk_flags or [])
+    conn.execute(
+        text(
+            """
+            INSERT INTO worker_memory_profiles (
+                user_id,
+                preferred_language,
+                skill_tags,
+                risk_flags,
+                last_equipment,
+                last_sop_code,
+                interaction_count,
+                last_interaction_at,
+                updated_at
+            )
+            VALUES (
+                CAST(:user_id AS uuid),
+                :preferred_language,
+                CAST(:skill_tags AS jsonb),
+                CAST(:risk_flags AS jsonb),
+                :last_equipment,
+                :last_sop_code,
+                1,
+                now(),
+                now()
+            )
+            ON CONFLICT (user_id) DO UPDATE
+            SET
+                preferred_language = COALESCE(EXCLUDED.preferred_language, worker_memory_profiles.preferred_language),
+                skill_tags = (
+                    SELECT COALESCE(jsonb_agg(DISTINCT tag), '[]'::jsonb)
+                    FROM jsonb_array_elements_text(worker_memory_profiles.skill_tags || EXCLUDED.skill_tags) AS tag
+                ),
+                risk_flags = (
+                    SELECT COALESCE(jsonb_agg(DISTINCT flag), '[]'::jsonb)
+                    FROM jsonb_array_elements_text(worker_memory_profiles.risk_flags || EXCLUDED.risk_flags) AS flag
+                ),
+                last_equipment = COALESCE(EXCLUDED.last_equipment, worker_memory_profiles.last_equipment),
+                last_sop_code = COALESCE(EXCLUDED.last_sop_code, worker_memory_profiles.last_sop_code),
+                interaction_count = worker_memory_profiles.interaction_count + 1,
+                last_interaction_at = now(),
+                updated_at = now()
+            """
+        ),
+        {
+            "user_id": user_id,
+            "preferred_language": language,
+            "skill_tags": _json_dumps(tags),
+            "risk_flags": _json_dumps(risks),
+            "last_equipment": _compact_text(equipment, max_chars=120) or None,
+            "last_sop_code": _compact_text(sop_code, max_chars=80) or None,
+        },
+    )
+
+
+def _extract_run_source(evidence: list[dict[str, Any]]) -> tuple[str | None, str | None]:
+    for item in evidence:
+        sop_code = _compact_text(item.get("document_code"), max_chars=80) or None
+        revision_id = _compact_text(item.get("revision_id"), max_chars=80) or None
+        if sop_code or revision_id:
+            return sop_code, revision_id
+    return None, None
+
+
+def _upsert_operation_run_record(
+    conn,
+    *,
+    user_id: str | None,
+    conversation_id: str | None,
+    state: dict[str, Any],
+    evidence: list[dict[str, Any]],
+) -> str | None:
+    if not user_id or not conversation_id:
+        return None
+    phase = str(state.get("phase") or "task_selection")
+    sop_code, revision_id = _extract_run_source(evidence)
+    status = "active"
+    completed_at = None
+    if phase == "completed":
+        status = "completed"
+        completed_at = datetime.now(timezone.utc)
+    elif phase == "supervisor_handoff":
+        status = "handoff"
+    elif phase == "blocked":
+        status = "blocked"
+
+    existing_id = conn.execute(
+        text(
+            """
+            SELECT id::text
+            FROM operation_run_records
+            WHERE user_id = CAST(:user_id AS uuid)
+              AND conversation_id = CAST(:conversation_id AS uuid)
+            ORDER BY started_at DESC
+            LIMIT 1
+            """
+        ),
+        {"user_id": user_id, "conversation_id": conversation_id},
+    ).scalar()
+
+    payload = {
+        "user_id": user_id,
+        "conversation_id": conversation_id,
+        "equipment": _compact_text(state.get("equipment"), max_chars=120) or None,
+        "task": _compact_text(state.get("task"), max_chars=160) or None,
+        "sop_code": sop_code,
+        "sop_revision_id": revision_id,
+        "current_phase": phase,
+        "current_step": int(state.get("step_index") or 0),
+        "prerequisites": _json_dumps(state.get("prerequisites") or {}),
+        "stop_conditions": _json_dumps(state.get("stop_conditions") or []),
+        "status": status,
+        "completed_at": completed_at,
+        "completion_record_id": state.get("completion_record_id"),
+        "metadata": _json_dumps({"state": state, "evidence_count": len(evidence)}),
+    }
+
+    if existing_id:
+        conn.execute(
+            text(
+                """
+                UPDATE operation_run_records
+                SET
+                    equipment = COALESCE(:equipment, equipment),
+                    task = COALESCE(:task, task),
+                    sop_code = COALESCE(:sop_code, sop_code),
+                    sop_revision_id = COALESCE(CAST(:sop_revision_id AS uuid), sop_revision_id),
+                    current_phase = :current_phase,
+                    current_step = :current_step,
+                    prerequisites = CAST(:prerequisites AS jsonb),
+                    stop_conditions = CAST(:stop_conditions AS jsonb),
+                    status = :status,
+                    completed_at = COALESCE(:completed_at, completed_at),
+                    completion_record_id = COALESCE(:completion_record_id, completion_record_id),
+                    metadata = CAST(:metadata AS jsonb)
+                WHERE id = CAST(:id AS uuid)
+                """
+            ),
+            {**payload, "id": existing_id},
+        )
+        return existing_id
+
+    return conn.execute(
+        text(
+            """
+            INSERT INTO operation_run_records (
+                user_id,
+                conversation_id,
+                equipment,
+                task,
+                sop_code,
+                sop_revision_id,
+                current_phase,
+                current_step,
+                prerequisites,
+                stop_conditions,
+                status,
+                completed_at,
+                completion_record_id,
+                metadata
+            )
+            VALUES (
+                CAST(:user_id AS uuid),
+                CAST(:conversation_id AS uuid),
+                :equipment,
+                :task,
+                :sop_code,
+                CAST(:sop_revision_id AS uuid),
+                :current_phase,
+                :current_step,
+                CAST(:prerequisites AS jsonb),
+                CAST(:stop_conditions AS jsonb),
+                :status,
+                :completed_at,
+                :completion_record_id,
+                CAST(:metadata AS jsonb)
+            )
+            RETURNING id::text
+            """
+        ),
+        payload,
+    ).scalar()
+
+
+def _create_supervisor_handoff(
+    conn,
+    *,
+    user_id: str | None,
+    conversation_id: str | None,
+    run_record_id: str | None,
+    state: dict[str, Any],
+    reason: str,
+) -> str | None:
+    if not user_id:
+        return None
+    if conversation_id:
+        existing_id = conn.execute(
+            text(
+                """
+                SELECT id::text
+                FROM supervisor_handoffs
+                WHERE user_id = CAST(:user_id AS uuid)
+                  AND conversation_id = CAST(:conversation_id AS uuid)
+                  AND status = 'open'
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+            ),
+            {"user_id": user_id, "conversation_id": conversation_id},
+        ).scalar()
+        if existing_id:
+            return existing_id
+
+    handoff_id = conn.execute(
+        text(
+            """
+            INSERT INTO supervisor_handoffs (
+                user_id,
+                conversation_id,
+                run_record_id,
+                equipment,
+                task,
+                reason,
+                severity,
+                status,
+                metadata
+            )
+            VALUES (
+                CAST(:user_id AS uuid),
+                CAST(:conversation_id AS uuid),
+                CAST(:run_record_id AS uuid),
+                :equipment,
+                :task,
+                :reason,
+                :severity,
+                'open',
+                CAST(:metadata AS jsonb)
+            )
+            RETURNING id::text
+            """
+        ),
+        {
+            "user_id": user_id,
+            "conversation_id": conversation_id,
+            "run_record_id": run_record_id,
+            "equipment": _compact_text(state.get("equipment"), max_chars=120) or None,
+            "task": _compact_text(state.get("task"), max_chars=160) or None,
+            "reason": _compact_text(reason, max_chars=260) or "Supervisor help requested",
+            "severity": "high" if state.get("phase") == "blocked" else "medium",
+            "metadata": _json_dumps({"state": state}),
+        },
+    ).scalar()
+
+    targets = [
+        row["id"]
+        for row in conn.execute(
+            text(
+                """
+                SELECT id::text AS id
+                FROM users
+                WHERE role IN ('admin', 'supervisor')
+                ORDER BY role, full_name
+                LIMIT 20
+                """
+            )
+        ).mappings()
+    ]
+    equipment = state.get("equipment") or "equipment"
+    task = state.get("task") or "run guide"
+    for target_user_id in targets:
+        _queue_notification(
+            conn,
+            user_id=target_user_id,
+            event_type="supervisor_handoff",
+            severity="medium",
+            title="Supervisor help requested",
+            message=f"Operator needs help for {_compact_text(equipment)} / {_compact_text(task)}.",
+            cta_url=f"/admin/analytics?focus=handoffs&handoff_id={handoff_id}",
+            event_key=f"supervisor_handoff:{handoff_id}:{target_user_id}",
+        )
+    return handoff_id
 
 
 def _history_from_messages(messages: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -1424,8 +1910,6 @@ def _should_use_query_rewrite(
     *,
     chat_scope: str,
 ) -> bool:
-    if _normalize_chat_scope(chat_scope) == "reader":
-        return False
     if not history:
         return False
     normalized_query = re.sub(r"\s+", " ", (query or "")).strip()
@@ -1440,9 +1924,6 @@ def _should_use_dspy_answer(
     chat_scope: str,
     history: list[dict[str, str]] | None = None,
 ) -> bool:
-    normalized_scope = _normalize_chat_scope(chat_scope)
-    if normalized_scope == "reader":
-        return False
     lowered = (query or "").strip().lower()
     if history and _is_contextual_follow_up(lowered):
         return True
@@ -1471,12 +1952,13 @@ def _primary_chat_url() -> str:
     return settings.PRIMARY_LLM_API_BASE.rstrip("/") + "/chat/completions"
 
 
-async def _call_primary_chat_model(
+def _primary_chat_payload(
     *,
     system_prompt: str,
     user_prompt: str,
     max_tokens: int,
-) -> str | None:
+    stream: bool = False,
+) -> dict[str, Any]:
     request_payload: dict[str, Any] = {
         "model": settings.PRIMARY_LLM_MODEL,
         "messages": [
@@ -1486,25 +1968,76 @@ async def _call_primary_chat_model(
         "max_tokens": max_tokens,
         "temperature": 0.1,
         "top_p": 1,
+        "stream": stream,
     }
     if settings.PRIMARY_LLM_ENABLE_THINKING:
         request_payload["chat_template_kwargs"] = {
             "enable_thinking": True,
             "clear_thinking": True,
         }
+    return request_payload
 
+
+async def _call_primary_chat_model(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int,
+) -> str | None:
     try:
         async with httpx.AsyncClient(timeout=settings.PRIMARY_LLM_TIMEOUT_SECONDS) as client:
             response = await client.post(
                 _primary_chat_url(),
                 headers=_primary_chat_headers(settings.PRIMARY_LLM_API_KEY),
-                json=request_payload,
+                json=_primary_chat_payload(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    max_tokens=max_tokens,
+                ),
             )
             response.raise_for_status()
             data = response.json()
         return (data["choices"][0]["message"]["content"] or "").strip() or None
     except Exception:
         return None
+
+
+async def _stream_primary_chat_model(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int,
+):
+    if not settings.has_primary_llm_credentials:
+        return
+    payload = _primary_chat_payload(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        max_tokens=max_tokens,
+        stream=True,
+    )
+    async with httpx.AsyncClient(timeout=settings.PRIMARY_LLM_TIMEOUT_SECONDS) as client:
+        async with client.stream(
+            "POST",
+            _primary_chat_url(),
+            headers=_primary_chat_headers(settings.PRIMARY_LLM_API_KEY),
+            json=payload,
+        ) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                data_text = line[5:].strip()
+                if not data_text or data_text == "[DONE]":
+                    continue
+                try:
+                    data = json.loads(data_text)
+                    delta = data["choices"][0].get("delta") or {}
+                except Exception:
+                    continue
+                content = delta.get("content")
+                if content:
+                    yield content
 
 
 async def _call_groq_chat_fallback(
@@ -2335,11 +2868,14 @@ async def _generate_grounded_answer(
     if not evidence:
         return safe_fallback
 
-    if is_summary_query:
+    if is_summary_query and not settings.has_primary_llm_credentials and not settings.GROQ_API_KEY:
         return _extractive_summary_from_evidence(
             evidence,
             points=summary_points,
         )
+
+    if normalized_scope == "reader" and _should_prefer_extractive_answer(query, evidence) and not is_summary_query:
+        return _extractive_answer_from_evidence(query, evidence, max_sentences=4)
 
     if _should_prefer_extractive_answer(query, evidence):
         return _extractive_answer_from_evidence(query, evidence)
@@ -2370,7 +2906,13 @@ async def _generate_grounded_answer(
 
     draft_answer: str | None = None
     draft_citations: str | None = None
-    dspy_role = "reader_copilot" if normalized_scope == "reader" else "operator"
+    dspy_role = (
+        "reader_copilot"
+        if normalized_scope == "reader"
+        else "operation_coach"
+        if normalized_scope == "guided"
+        else "operator"
+    )
 
     if use_dspy_answer:
         dspy_response = await _run_blocking_with_timeout(
@@ -2404,6 +2946,14 @@ async def _generate_grounded_answer(
                 style_instruction += (
                     f"For summary requests, return exactly {summary_points} clean numbered points from the evidence only. "
                 )
+        elif normalized_scope == "guided":
+            style_instruction = (
+                "You are a guided industrial operation coach for authorized operators. "
+                "Do not assume the operator should perform the task. First separate learning from live operation when intent is unclear. "
+                "For live operation, give one small checkpoint at a time, mention stop conditions, PPE, isolation/permit checks, and supervisor escalation when required. "
+                "Use simple shop-floor language with citation markers [1], [2]. "
+                "Never invent steps beyond approved evidence. "
+            )
         else:
             style_instruction = (
                 "You are a plant assistant for general SOP/manual help across approved documents. "
@@ -2427,7 +2977,7 @@ async def _generate_grounded_answer(
             "Based on the evidence above, answer the question directly. Extract the specific steps or information requested."
         )
 
-        max_tokens = 240 if normalized_scope == "reader" else 320
+        max_tokens = 480 if (normalized_scope == "reader" and is_summary_query) else 320
         if settings.has_primary_llm_credentials:
             draft_answer = await _call_primary_chat_model(
                 system_prompt=system_prompt,
@@ -2456,6 +3006,69 @@ async def _generate_grounded_answer(
             return safe_fallback
 
     return draft_answer or _extractive_answer_from_evidence(query, evidence)
+
+
+def _build_grounded_chat_prompt(
+    query: str,
+    language: str,
+    evidence: list[dict[str, Any]],
+    history: list[dict[str, str]] | None = None,
+    chat_scope: str = "general",
+) -> tuple[str, str, int]:
+    normalized_scope = _normalize_chat_scope(chat_scope)
+    evidence_limit = 10 if normalized_scope == "reader" else 5
+    context_blocks = []
+    for idx, ev in enumerate(evidence[:evidence_limit], start=1):
+        line_start = ev.get("line_start")
+        line_end = ev.get("line_end")
+        line_label = ""
+        if line_start is not None:
+            line_label = (
+                f" l.{line_start}-{line_end}"
+                if line_end is not None and line_end != line_start
+                else f" l.{line_start}"
+            )
+        citation = ev.get("citation_label") or (
+            f"{ev.get('document_code', 'doc')} p.{ev.get('page_start', '?')}{line_label}"
+        )
+        content = (ev.get("content") or "")[:1600]
+        context_blocks.append(f"[{idx}] {citation}\n{content}")
+    context = "\n\n".join(context_blocks)
+    history_text = "\n".join(
+        f"{item['role'].title()}: {item['content']}"
+        for item in (history or [])[-8:]
+        if item.get("content")
+    )
+    if normalized_scope == "reader":
+        style_instruction = (
+            "You are a document-reading copilot. Keep answers concise, grounded, and easy to act on. "
+            "Use citation markers [1], [2]. Do not answer beyond provided evidence. "
+        )
+    elif normalized_scope == "guided":
+        style_instruction = (
+            "You are a guided industrial operation coach for authorized operators. "
+            "Give one checkpoint at a time, include stop conditions, PPE, isolation/permit checks, and supervisor escalation when required. "
+            "Never invent steps beyond approved evidence. "
+        )
+    else:
+        style_instruction = (
+            "You are a plant assistant for general SOP, training, quiz, and operations help. "
+            "Answer in simple shop-floor language. Be brief, practical, and grounded. "
+        )
+    system_prompt = (
+        style_instruction
+        + "Answer using ONLY the approved evidence. If the evidence does not answer the question, say: Not found in approved documents. "
+        + "Use conversation history only to resolve follow-up references, never to invent facts."
+    )
+    user_prompt = (
+        f"Question: {query}\n"
+        f"Language: {language}\n\n"
+        f"Conversation history:\n{history_text or 'No prior conversation.'}\n\n"
+        f"Approved evidence:\n{context}\n\n"
+        "Answer directly with citations."
+    )
+    max_tokens = 480 if normalized_scope == "reader" else 360
+    return system_prompt, user_prompt, max_tokens
 
 
 @app.get("/")
@@ -2623,6 +3236,203 @@ async def dashboard_summary(user_id: str):
         "mandatory_training": assignments,
         "recent_sops": recent_sops,
         "safety_alerts": safety_alerts,
+    }
+
+
+@app.get("/api/worker/brief")
+async def worker_brief(user_id: str):
+    with engine.begin() as conn:
+        user = _get_user(conn, user_id)
+        _materialize_user_notifications(conn, user_id)
+
+        memory = conn.execute(
+            text(
+                """
+                SELECT
+                    preferred_language,
+                    skill_tags,
+                    risk_flags,
+                    last_equipment,
+                    last_sop_code,
+                    interaction_count,
+                    last_interaction_at,
+                    updated_at
+                FROM worker_memory_profiles
+                WHERE user_id = CAST(:user_id AS uuid)
+                """
+            ),
+            {"user_id": user_id},
+        ).mappings().first()
+
+        assignment_rows = [
+            dict(row)
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT
+                        ta.id::text AS assignment_id,
+                        tm.title AS module_title,
+                        tm.criticality,
+                        ta.status,
+                        ta.progress_percent,
+                        ta.due_at
+                    FROM training_assignments ta
+                    JOIN training_modules tm ON tm.id = ta.module_id
+                    WHERE ta.user_id = CAST(:user_id AS uuid)
+                      AND ta.status IN ('assigned', 'in_progress')
+                    ORDER BY
+                        ta.is_mandatory DESC,
+                        ta.due_at ASC NULLS LAST,
+                        tm.criticality DESC,
+                        tm.title
+                    LIMIT 4
+                    """
+                ),
+                {"user_id": user_id},
+            ).mappings()
+        ]
+
+        latest_revisions = [
+            dict(row)
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT
+                        d.code,
+                        d.title,
+                        d.document_type,
+                        dr.id::text AS revision_id,
+                        dr.revision_label,
+                        dr.updated_at
+                    FROM document_revisions dr
+                    JOIN documents d ON d.id = dr.document_id
+                    WHERE dr.is_latest_approved = true
+                    ORDER BY dr.updated_at DESC, d.code
+                    LIMIT 4
+                    """
+                )
+            ).mappings()
+        ]
+
+        handoff_rows = [
+            dict(row)
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT
+                        id::text AS handoff_id,
+                        equipment,
+                        task,
+                        reason,
+                        severity,
+                        status,
+                        created_at
+                    FROM supervisor_handoffs
+                    WHERE user_id = CAST(:user_id AS uuid)
+                      AND status = 'open'
+                    ORDER BY created_at DESC
+                    LIMIT 4
+                    """
+                ),
+                {"user_id": user_id},
+            ).mappings()
+        ]
+
+        activity_rows = [
+            dict(row)
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT
+                        id::text AS activity_id,
+                        event_type,
+                        event_source,
+                        severity,
+                        title,
+                        details,
+                        created_at
+                    FROM worker_activity_events
+                    WHERE user_id = CAST(:user_id AS uuid)
+                    ORDER BY created_at DESC
+                    LIMIT 8
+                    """
+                ),
+                {"user_id": user_id},
+            ).mappings()
+        ]
+
+    now = datetime.now(timezone.utc)
+    today: list[dict[str, Any]] = []
+
+    for row in handoff_rows[:2]:
+        today.append(
+            {
+                "type": "supervisor_handoff",
+                "priority": "high" if row.get("severity") == "high" else "medium",
+                "title": "Supervisor help is open",
+                "detail": _compact_text(
+                    f"{row.get('equipment') or 'Equipment'} - {row.get('task') or row.get('reason') or 'Help requested'}",
+                    max_chars=120,
+                ),
+                "cta_url": "/operator/command-hub",
+                "created_at": _iso(row.get("created_at")),
+            }
+        )
+
+    for row in assignment_rows[:3]:
+        due_at = row.get("due_at")
+        if due_at and due_at.tzinfo is None:
+            due_at = due_at.replace(tzinfo=timezone.utc)
+        priority = "medium"
+        detail = f"{int(row.get('progress_percent') or 0)}% complete"
+        if due_at and due_at <= now:
+            priority = "high"
+            detail = "Overdue. Complete before next shift handover."
+        elif due_at:
+            days_left = max(0, int((due_at - now).total_seconds() // 86400))
+            detail = f"{detail}. Due in {days_left} day(s)."
+        today.append(
+            {
+                "type": "training",
+                "priority": priority,
+                "title": _compact_text(row.get("module_title"), max_chars=100) or "Training assigned",
+                "detail": detail,
+                "cta_url": "/operator/training",
+                "due_at": _iso(row.get("due_at")),
+            }
+        )
+
+    for row in latest_revisions[:3]:
+        today.append(
+            {
+                "type": "document_revision",
+                "priority": "medium",
+                "title": _compact_text(f"{row.get('code')} updated", max_chars=100),
+                "detail": _compact_text(row.get("title"), max_chars=130),
+                "cta_url": f"/operator/reader/{row.get('revision_id')}?page=1" if row.get("revision_id") else "/operator",
+                "updated_at": _iso(row.get("updated_at")),
+                "document_code": row.get("code"),
+                "revision_label": row.get("revision_label"),
+            }
+        )
+
+    memory_payload = dict(memory) if memory else {}
+    for key in ("last_interaction_at", "updated_at"):
+        if key in memory_payload:
+            memory_payload[key] = _iso(memory_payload[key])
+
+    for row in activity_rows:
+        row["created_at"] = _iso(row.get("created_at"))
+
+    for row in handoff_rows:
+        row["created_at"] = _iso(row.get("created_at"))
+
+    return {
+        "user": user,
+        "memory": memory_payload,
+        "today": today[:6],
+        "open_handoffs": handoff_rows,
+        "recent_activity": activity_rows,
     }
 
 
@@ -2939,6 +3749,906 @@ async def get_chat_conversation(
     )
 
 
+def _operation_guide_mode(query: str, requested_intent: str | None = None) -> str:
+    requested = (requested_intent or "").strip().lower()
+    if requested in {"run", "live", "execute", "operate"}:
+        return "run"
+    if requested in {"learn", "knowledge", "explain", "study"}:
+        return "learn"
+
+    lowered = (query or "").lower()
+    if re.search(r"\b(run|start|operate)\b.{0,80}\b(now|live|with checks)\b", lowered):
+        return "run"
+    run_markers = (
+        "run now",
+        "start now",
+        "operate now",
+        "execute",
+        "i am at",
+        "i reached",
+        "ready to start",
+        "start step",
+        "karna hai",
+        "chalu karna",
+        "chalana",
+        "abhi start",
+    )
+    learn_markers = (
+        "learn",
+        "knowledge",
+        "explain",
+        "understand",
+        "training",
+        "sirf jankari",
+        "samjhao",
+        "padhna",
+    )
+    if any(marker in lowered for marker in run_markers):
+        return "run"
+    if any(marker in lowered for marker in learn_markers):
+        return "learn"
+    return "clarify"
+
+
+def _is_guided_advance_query(query: str) -> bool:
+    lowered = (query or "").lower()
+    advance_markers = (
+        "i am at",
+        "i reached",
+        "done",
+        "clear",
+        "yes",
+        "next",
+        "show next",
+        "checkpoint clear",
+        "at the pump",
+        "main pump",
+        "paas",
+        "hoon",
+        "ho gaya",
+        "agla",
+    )
+    return any(marker in lowered for marker in advance_markers)
+
+
+def _guided_history_is_live_run(history: list[dict[str, str]] | None) -> bool:
+    if not history:
+        return False
+    for item in reversed(history[-8:]):
+        if item.get("role") != "assistant":
+            continue
+        content = (item.get("content") or "").lower()
+        if "live run guide" in content or "checkpoint" in content:
+            return True
+        if "learn the procedure first" in content:
+            return False
+    return False
+
+
+def _guided_next_step_index(
+    history: list[dict[str, str]] | None,
+    query: str,
+    guide_mode: str,
+) -> int:
+    if guide_mode != "run":
+        return 1
+    max_seen = 0
+    for item in history or []:
+        if item.get("role") != "assistant":
+            continue
+        content = item.get("content") or ""
+        for match in re.finditer(r"\b(?:checkpoint|step)\s+(\d+)\b", content, flags=re.IGNORECASE):
+            try:
+                max_seen = max(max_seen, int(match.group(1)))
+            except Exception:
+                continue
+    if max_seen <= 0:
+        return 1
+    return max_seen + 1 if _is_guided_advance_query(query) else max_seen
+
+
+def _operation_step_keywords(step_index: int) -> str:
+    step_keywords = {
+        1: "prime pump fill pump casing water before starting engine do not attempt to start",
+        2: "suction strainer under water suction hose securely attached no air leakage clamps couplings",
+        3: "engine fuel valve lever ON position",
+        4: "throttle lever away from slow one third toward fast start position",
+        5: "choke lever CLOSED cold engine OPEN warm engine",
+        6: "engine ON OFF switch ON position",
+        7: "starter grip pull briskly smoothly compression point",
+        8: "engine warms choke OPEN run several minutes check fuel leaks noises loose component",
+        9: "shutdown throttle IDLE engine OFF fuel shut off lever OFF emergency shutdown",
+    }
+    return step_keywords.get(step_index, step_keywords[8])
+
+
+def _operation_step_instruction(step_index: int) -> str:
+    step_text = {
+        1: "Before starting, confirm the pump casing is filled with water. Do not start the engine if the pump has not been primed.",
+        2: "Check that the suction strainer is clean, fully under water, and securely attached to the suction hose.",
+        3: "Check that the suction and discharge hoses are securely connected, with no air leakage on the suction side.",
+        4: "Place the engine fuel valve lever in the ON position.",
+        5: "Move the throttle lever about one-third of the way from slow toward fast.",
+        6: "Set the choke correctly: CLOSED for a cold engine, OPEN for a warm engine or warm weather.",
+        7: "Place the engine ON/OFF switch in the ON position.",
+        8: "Pull the starter grip briskly and smoothly at the compression point to start the engine.",
+        9: "After the engine starts, open the choke as it warms up, run for several minutes, and check for fuel leaks or unusual noises.",
+    }
+    return step_text.get(
+        step_index,
+        "Continue only with the approved site SOP and supervisor direction. Stop if the condition is not exactly as expected.",
+    )
+
+
+def _operation_step_evidence_lookup(
+    *,
+    query_text: str,
+    step_index: int,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    tokens = [
+        token
+        for token in re.findall(
+            r"[a-z0-9]+",
+            (_operation_step_keywords(step_index) + " " + _operation_step_instruction(step_index)).lower(),
+        )
+        if len(token) > 3
+    ]
+    priority_tokens = tokens[:10] or ["pump", "start"]
+    token_clauses = []
+    score_clauses = []
+    params: dict[str, Any] = {"limit": max(1, min(limit, 8))}
+    for index, token in enumerate(priority_tokens):
+        key = f"term_{index}"
+        token_clauses.append(f"lower(dc.content) LIKE :{key}")
+        score_clauses.append(f"CASE WHEN lower(dc.content) LIKE :{key} THEN 1 ELSE 0 END")
+        params[key] = f"%{token}%"
+
+    lowered_query = (query_text or "").lower()
+    equipment_clause = ""
+    if "pump" in lowered_query or "centrifugal" in lowered_query:
+        equipment_clause = "AND (lower(d.title) LIKE '%pump%' OR lower(d.code) LIKE '%pump%')"
+
+    sql = text(
+        f"""
+        SELECT
+            dc.id::text AS chunk_id,
+            d.code AS document_code,
+            d.title AS document_title,
+            dr.id::text AS revision_id,
+            dr.revision_label AS revision_label,
+            dc.page_start,
+            dc.page_end,
+            dc.citation_label,
+            dc.section_title,
+            dc.block_ids,
+            dc.content,
+            dc.bbox_x0,
+            dc.bbox_y0,
+            dc.bbox_x1,
+            dc.bbox_y1
+        FROM document_chunks dc
+        JOIN document_revisions dr ON dc.revision_id = dr.id
+        JOIN documents d ON dr.document_id = d.id
+        WHERE dr.is_latest_approved = true
+          {equipment_clause}
+          AND ({' OR '.join(token_clauses)})
+        ORDER BY
+            ({' + '.join(score_clauses)}) DESC,
+            CASE WHEN lower(d.title) LIKE '%pump%' THEN 0 ELSE 1 END,
+            dc.page_start NULLS LAST,
+            dc.chunk_index
+        LIMIT :limit
+        """
+    )
+
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(sql, params).mappings().all()
+    except Exception:
+        return []
+
+    evidence: list[dict[str, Any]] = []
+    for index, row in enumerate(rows):
+        item = dict(row)
+        block_ids = item.get("block_ids") or []
+        if isinstance(block_ids, str):
+            try:
+                block_ids = json.loads(block_ids)
+            except Exception:
+                block_ids = []
+        item["block_ids"] = block_ids
+        item["line_start"] = None
+        item["line_end"] = None
+        item["scores"] = {
+            "lexical": round(1.0 - (index * 0.08), 6),
+            "semantic": 0.0,
+            "page_match": 0.0,
+            "multimodal": 0.0,
+            "final": round(1.0 - (index * 0.08), 6),
+        }
+        evidence.append(item)
+    return evidence
+
+
+def _operation_next_actions(mode: str, language: str) -> list[str]:
+    normalized_language = _normalize_chat_language(language)
+    if normalized_language == "hi":
+        if mode == "run":
+            return ["मैं मशीन के पास हूँ", "अगला स्टेप बताओ", "सुपरवाइजर मदद चाहिए"]
+        if mode == "learn":
+            return ["मुझे स्टार्टअप समझाओ", "मुझे शटडाउन समझाओ", "क्विज शुरू करो"]
+        return ["अभी चलाना है", "सिर्फ समझना है", "सुपरवाइजर मदद चाहिए"]
+    if normalized_language == "hing":
+        if mode == "run":
+            return ["Main pump ke paas hoon", "Next step batao", "Supervisor help chahiye"]
+        if mode == "learn":
+            return ["Startup samjhao", "Shutdown samjhao", "Quiz start karo"]
+        return ["Abhi run karna hai", "Sirf learn karna hai", "Supervisor help chahiye"]
+    if mode == "run":
+        return ["I am at the pump", "Show next step", "Need supervisor help"]
+    if mode == "learn":
+        return ["Explain startup", "Explain shutdown", "Start quiz"]
+    return ["Run now with checks", "Learn first", "Need supervisor help"]
+
+
+GUIDED_PREREQUISITES = (
+    ("authorization", "authorization to perform this task"),
+    ("ppe", "required PPE is worn"),
+    ("permit_isolation", "permit/isolation checks are complete"),
+    ("area_safe", "area is clear and safe"),
+)
+
+
+def _new_guided_operation_state(query: str, language: str) -> dict[str, Any]:
+    lowered = (query or "").lower()
+    equipment = "centrifugal pump" if "pump" in lowered or "centrifugal" in lowered else None
+    task = "startup" if re.search(r"\b(start|run|operate|chalu|chalana)\b", lowered) else None
+    return {
+        "version": "operation_guide_v1",
+        "phase": "task_selection" if not equipment else "task_selected",
+        "mode": "clarify",
+        "equipment": equipment,
+        "task": task,
+        "step_index": 0,
+        "prerequisites": {key: False for key, _ in GUIDED_PREREQUISITES},
+        "stop_conditions": [
+            "condition differs from the approved SOP",
+            "leak, abnormal noise, vibration, smell, or heat is observed",
+            "pump is not primed or suction is not confirmed",
+            "operator is unsure or not authorized",
+        ],
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "completed_at": None,
+        "completion_record_id": None,
+    }
+
+
+def _coerce_guided_state(metadata: dict[str, Any], query: str, language: str) -> dict[str, Any]:
+    state = metadata.get("operation_state")
+    if not isinstance(state, dict) or state.get("version") != "operation_guide_v1":
+        return _new_guided_operation_state(query, language)
+    if not state.get("equipment"):
+        inferred = _new_guided_operation_state(query, language)
+        state["equipment"] = inferred.get("equipment")
+        state["task"] = state.get("task") or inferred.get("task")
+    state.setdefault("prerequisites", {key: False for key, _ in GUIDED_PREREQUISITES})
+    state.setdefault("stop_conditions", _new_guided_operation_state(query, language)["stop_conditions"])
+    state.setdefault("step_index", 0)
+    state.setdefault("phase", "task_selected" if state.get("equipment") else "task_selection")
+    return state
+
+
+def _guided_state_label(state: dict[str, Any]) -> str:
+    labels = {
+        "task_selection": "Task selection",
+        "task_selected": "Task selected",
+        "learning": "Learning mode",
+        "prerequisite_checks": "Pre-checks",
+        "running": "Live step-by-step",
+        "supervisor_handoff": "Supervisor handoff",
+        "completed": "Completed",
+        "blocked": "Blocked",
+    }
+    return labels.get(str(state.get("phase") or ""), "Run guide")
+
+
+def _guided_completion_record_id(conversation_id: str | None) -> str:
+    suffix = (conversation_id or str(uuid.uuid4())).split("-")[0].upper()
+    return f"RUN-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{suffix}"
+
+
+def _guided_confirmed_prerequisites(query: str) -> set[str]:
+    lowered = (query or "").lower()
+    if any(marker in lowered for marker in ("all checks", "all clear", "everything clear", "sab clear", "all ok")):
+        return {key for key, _ in GUIDED_PREREQUISITES}
+    confirmed: set[str] = set()
+    if any(marker in lowered for marker in ("authorization", "authorised", "authorized", "permission")):
+        confirmed.add("authorization")
+    if "ppe" in lowered or "helmet" in lowered or "gloves" in lowered or "goggles" in lowered:
+        confirmed.add("ppe")
+    if "permit" in lowered or "isolation" in lowered or "loto" in lowered:
+        confirmed.add("permit_isolation")
+    if "area" in lowered or "clear" in lowered or "safe" in lowered:
+        confirmed.add("area_safe")
+    return confirmed
+
+
+def _guided_missing_prerequisites(state: dict[str, Any]) -> list[tuple[str, str]]:
+    prereqs = state.get("prerequisites") or {}
+    return [(key, label) for key, label in GUIDED_PREREQUISITES if not prereqs.get(key)]
+
+
+def _build_guided_prerequisite_prompt(state: dict[str, Any], language: str) -> str:
+    equipment = state.get("equipment") or "equipment"
+    task = state.get("task") or "task"
+    missing = _guided_missing_prerequisites(state)
+    confirmed = len(GUIDED_PREREQUISITES) - len(missing)
+    missing_lines = "\n".join(f"- Confirm {label}." for _, label in missing)
+    if not missing_lines:
+        missing_lines = "- All pre-checks are confirmed."
+    return (
+        f"Run guide state: {equipment} / {task}.\n\n"
+        f"Before live steps, complete pre-checks ({confirmed}/{len(GUIDED_PREREQUISITES)} confirmed):\n"
+        f"{missing_lines}\n\n"
+        "Reply with the specific check completed, or say 'all checks clear'. "
+        "If any check is not clear, stop and choose supervisor help."
+    )
+
+
+def _guided_next_actions_for_state(state: dict[str, Any], language: str) -> list[str]:
+    phase = state.get("phase")
+    if phase == "task_selection":
+        return ["How to start centrifugal pump", "Learn centrifugal pump startup", "Need supervisor help"]
+    if phase == "task_selected":
+        return ["Run now with checks", "Learn first", "Need supervisor help"]
+    if phase == "prerequisite_checks":
+        missing = _guided_missing_prerequisites(state)
+        actions = [f"{label.title()} OK" for _, label in missing[:2]]
+        actions.append("All checks clear")
+        actions.append("Need supervisor help")
+        return actions
+    if phase == "running":
+        return ["Checkpoint clear", "Show next step", "Need supervisor help"]
+    if phase == "learning":
+        return ["Run now with checks", "Ask a doubt", "Need supervisor help"]
+    if phase == "supervisor_handoff":
+        return ["Call supervisor", "Describe current condition", "Close guide"]
+    if phase == "completed":
+        return ["Start another guide", "Open report", "Ask a follow-up"]
+    return ["Run now with checks", "Learn first", "Need supervisor help"]
+
+
+def _sse_event(event: str, payload: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _stream_text_chunks(text_value: str, *, max_chars: int = 24) -> list[str]:
+    words = re.findall(r"\S+\s*", text_value)
+    chunks: list[str] = []
+    current = ""
+    for word in words:
+        if current and len(current) + len(word) > max_chars:
+            chunks.append(current)
+            current = word
+        else:
+            current += word
+    if current:
+        chunks.append(current)
+    return chunks or [text_value]
+
+
+def _source_status_from_evidence(evidence: list[dict[str, Any]], *, fallback: str) -> str:
+    labels: list[str] = []
+    for ev in evidence[:3]:
+        code = ev.get("document_code") or "document"
+        page = ev.get("page_start")
+        label = f"{code} p.{page}" if page else str(code)
+        if label not in labels:
+            labels.append(label)
+    if not labels:
+        return fallback
+    return "Reviewing evidence from " + ", ".join(labels)
+
+
+def _build_operation_clarifier(
+    *,
+    query: str,
+    language: str,
+    evidence: list[dict[str, Any]],
+) -> str:
+    source_hint = ""
+    if evidence:
+        top = evidence[0]
+        source_hint = f" I found a matching approved source: {top.get('document_code') or 'document'} p.{top.get('page_start') or '?'}."
+    normalized_language = _normalize_chat_language(language)
+    if normalized_language == "hi":
+        return (
+            "पहले स्पष्ट करें: आप इसे अभी मशीन पर चलाना चाहते हैं या सिर्फ सीखना चाहते हैं?"
+            f"{source_hint} अगर अभी चलाना है, तो मैं छोटे-छोटे safety checkpoints में आगे बढ़ाऊँगा।"
+        )
+    if normalized_language == "hing":
+        return (
+            "Pehle clear karo: aap isko abhi machine par run karna chahte ho ya sirf learn karna chahte ho?"
+            f"{source_hint} Agar abhi run karna hai, main small safety checkpoints me guide karunga."
+        )
+    return (
+        "First choose the mode: do you want to run this now on the equipment, or learn the procedure first?"
+        f"{source_hint} If this is a live operation, I will guide one checkpoint at a time and stop when a permit, PPE, condition, or supervisor check is required."
+    )
+
+
+def _build_operation_run_checkpoint(
+    *,
+    evidence: list[dict[str, Any]],
+    language: str,
+    step_index: int = 1,
+) -> str:
+    if not evidence:
+        return "Not found in approved documents."
+
+    def score_operation_source(item: dict[str, Any]) -> int:
+        text_value = (item.get("content") or "").lower()
+        step_terms = [
+            token
+            for token in re.findall(r"[a-z0-9]+", _operation_step_keywords(step_index).lower())
+            if len(token) > 2
+        ]
+        score = 0
+        score += sum(1 for token in step_terms if token in text_value)
+        if "do not attempt to start" in text_value or "primed" in text_value:
+            score += 8
+        if "starting the engine" in text_value:
+            score += 6
+        if "fuel valve" in text_value or "on position" in text_value:
+            score += 3
+        if "fill pump casing with water" in text_value or "pump casing" in text_value:
+            score += 4
+        if "shutdown" in text_value or "off position" in text_value:
+            score -= 5
+        if "idle position" in text_value and "three minutes" in text_value:
+            score -= 4
+        return score
+
+    top = max(evidence[:6], key=score_operation_source)
+    citation = top.get("citation_label") or f"{top.get('document_code', 'doc')} p.{top.get('page_start', '?')}"
+    checkpoint = _operation_step_instruction(step_index)
+    checkpoint = (
+        checkpoint.replace("Â", "")
+        .replace("Â", "")
+        .replace("â", "-")
+        .replace("â¢", "-")
+        .replace("fi ll", "fill")
+        .replace("fi lled", "filled")
+        .replace("lose component", "loose component")
+    )
+    checkpoint = checkpoint.encode("ascii", "ignore").decode("ascii")
+    checkpoint = re.sub(r"\s+", " ", checkpoint).strip(" -")
+
+    normalized_language = _normalize_chat_language(language)
+    if normalized_language == "hi":
+        return (
+            f"Live run guide. पहले authorization, PPE, permit/isolation और area safe confirm करें।\n\n"
+            f"Checkpoint {step_index}: {checkpoint} [{citation}]\n\n"
+            "अगर condition अलग है, leak/noise है, pump primed नहीं है, या doubt है तो stop करें और supervisor को बुलाएँ। "
+            "Confirm करें: क्या आप pump के पास हैं और यह checkpoint clear है?"
+        )
+    if normalized_language == "hing":
+        return (
+            f"Live run guide. Pehle authorization, PPE, permit/isolation aur area safe confirm karo.\n\n"
+            f"Checkpoint {step_index}: {checkpoint} [{citation}]\n\n"
+            "Agar condition alag hai, leak/noise hai, pump primed nahi hai, ya doubt hai to stop karo aur supervisor ko bulao. "
+            "Confirm karo: kya aap pump ke paas ho aur checkpoint clear hai?"
+        )
+    return (
+        "Live run guide. First confirm authorization, PPE, permit/isolation, and safe area conditions.\n\n"
+        f"Checkpoint {step_index}: {checkpoint} [{citation}]\n\n"
+        "Stop if the condition differs from the approved source, if there is a leak/noise, if the pump is not primed, "
+        "or if you are unsure. Confirm: is this checkpoint clear?"
+    )
+
+
+@app.post("/api/operation-guide", response_model=OperationGuideResponse)
+async def operation_guide(req: OperationGuideRequest):
+    request_started_at = perf_counter()
+    normalized_scope = "guided"
+    conversation_id = req.conversation_id
+    history: list[dict[str, str]] = []
+    conversation_metadata: dict[str, Any] = {}
+
+    if req.user_id:
+        with engine.connect() as conn:
+            _get_user(conn, req.user_id)
+            if conversation_id:
+                conversation_scope = _detect_chat_scope_for_conversation(
+                    conn, conversation_id, req.user_id
+                )
+                if not conversation_scope:
+                    raise HTTPException(status_code=404, detail="Conversation not found")
+                if conversation_scope != normalized_scope:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "Conversation scope mismatch. "
+                            f"Expected '{normalized_scope}', found '{conversation_scope}'."
+                        ),
+                    )
+                history = _history_from_messages(
+                    _get_chat_messages(conn, conversation_id, chat_scope=normalized_scope)
+                )
+                conversation_metadata = _get_conversation_metadata(
+                    conn,
+                    conversation_id,
+                    req.user_id,
+                    chat_scope=normalized_scope,
+                )
+
+    guardrail_decision = evaluate_guardrail(req.query)
+    if guardrail_decision.blocked:
+        answer = guardrail_decision.user_message
+        if req.user_id:
+            with engine.begin() as conn:
+                _get_user(conn, req.user_id)
+                if not conversation_id:
+                    conversation = _create_chat_conversation(
+                        conn,
+                        user_id=req.user_id,
+                        language=req.language,
+                        title=_conversation_title_from_query(req.query),
+                        chat_scope=normalized_scope,
+                        metadata={"scope": normalized_scope, "pipeline": "operation_guide"},
+                    )
+                    conversation_id = conversation["id"]
+                _append_chat_message(
+                    conn,
+                    conversation_id=conversation_id,
+                    role="user",
+                    content=req.query,
+                    language=req.language,
+                    response_mode="operation",
+                    chat_scope=normalized_scope,
+                )
+                _append_chat_message(
+                    conn,
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=answer,
+                    language=req.language,
+                    response_mode="operation",
+                    chat_scope=normalized_scope,
+                )
+                _upsert_worker_memory(
+                    conn,
+                    user_id=req.user_id,
+                    language=req.language,
+                    skill_tags=["operation guide", "guardrail"],
+                    risk_flags=[guardrail_decision.category or "blocked"],
+                )
+                _record_worker_activity(
+                    conn,
+                    user_id=req.user_id,
+                    event_type="operation_guardrail_block",
+                    severity=guardrail_decision.severity or "high",
+                    title="Run Guide stopped unsafe request",
+                    details={
+                        "conversation_id": conversation_id,
+                        "query": req.query,
+                        "guardrail": _guardrail_diagnostics(guardrail_decision),
+                    },
+                )
+                _notify_guardrail_violation(
+                    conn,
+                    user_id=req.user_id,
+                    query_text=req.query,
+                    decision=guardrail_decision,
+                    channel="operation_guide",
+                    conversation_id=conversation_id,
+                )
+        return OperationGuideResponse(
+            answer=answer,
+            mode="blocked",
+            next_actions=[],
+            state={"phase": "blocked"},
+            state_label="Blocked",
+            requires_supervisor=True,
+            confidence=0.0,
+            latency_ms=int((perf_counter() - request_started_at) * 1000),
+            retrieval_event_id=None,
+            conversation_id=conversation_id,
+            evidence=[],
+            diagnostics={"guardrail": _guardrail_diagnostics(guardrail_decision)},
+        )
+
+    state = _coerce_guided_state(conversation_metadata, req.query, req.language)
+    guide_mode = _operation_guide_mode(req.query, req.intent)
+    lowered_query = (req.query or "").lower()
+    if guide_mode == "clarify" and _guided_history_is_live_run(history):
+        guide_mode = "run"
+    if state.get("phase") == "prerequisite_checks" and guide_mode == "clarify":
+        guide_mode = "run"
+    if state.get("phase") == "running" and guide_mode == "clarify":
+        guide_mode = "run"
+    if "supervisor" in lowered_query or "help" in lowered_query and "supervisor" in lowered_query:
+        guide_mode = "blocked"
+        state["phase"] = "supervisor_handoff"
+        state["requires_supervisor"] = True
+    elif guide_mode == "learn":
+        state["mode"] = "learn"
+        state["phase"] = "learning"
+    elif guide_mode == "run":
+        state["mode"] = "run"
+        if not state.get("equipment"):
+            state["phase"] = "task_selection"
+        else:
+            prereqs = state.setdefault("prerequisites", {key: False for key, _ in GUIDED_PREREQUISITES})
+            for key in _guided_confirmed_prerequisites(req.query):
+                prereqs[key] = True
+            if _guided_missing_prerequisites(state):
+                state["phase"] = "prerequisite_checks"
+            else:
+                state["phase"] = "running"
+
+    if state.get("phase") == "running":
+        current_step = int(state.get("step_index") or 0)
+        if current_step <= 0:
+            step_index = 1
+        elif _is_guided_advance_query(req.query):
+            step_index = current_step + 1
+        else:
+            step_index = current_step
+        if step_index > 9:
+            state["phase"] = "completed"
+            state["completed_at"] = datetime.now(timezone.utc).isoformat()
+            state["completion_record_id"] = state.get("completion_record_id") or _guided_completion_record_id(conversation_id)
+            step_index = 9
+        state["step_index"] = step_index
+    else:
+        step_index = int(state.get("step_index") or 0) or 1
+
+    contextual_query = _build_contextual_query(req.query, history)
+    retrieval_query = contextual_query
+    direct_answer: str | None = None
+    direct_evidence: list[dict[str, Any]] = []
+    result: dict[str, Any] | None = None
+
+    if state.get("phase") == "task_selection":
+        direct_answer = (
+            "Tell me the equipment and the task first. Example: 'start centrifugal pump'. "
+            "After that I will ask whether this is live operation or learning."
+        )
+    elif state.get("phase") == "supervisor_handoff":
+        direct_answer = (
+            "Stop the live guide. Supervisor handoff is required before continuing. "
+            "Share the equipment, task, current condition, and why help is needed."
+        )
+    elif state.get("phase") == "prerequisite_checks":
+        direct_answer = _build_guided_prerequisite_prompt(state, req.language)
+    elif state.get("phase") == "completed":
+        direct_answer = (
+            f"Run guide completed. Completion record: {state.get('completion_record_id')}. "
+            "If any abnormal condition occurred, report it before closing the job."
+        )
+
+    if direct_answer is not None:
+        evidence = direct_evidence
+        result = {
+            "confidence": 1.0 if state.get("phase") in {"prerequisite_checks", "completed"} else 0.0,
+            "latency_ms": int((perf_counter() - request_started_at) * 1000),
+            "retrieval_event_id": None,
+            "evidence": evidence,
+            "diagnostics": {
+                "pipeline": "operation_state_machine",
+                "state_phase": state.get("phase"),
+                "step_index": state.get("step_index"),
+            },
+        }
+    elif state.get("phase") == "running":
+        retrieval_query = (
+            contextual_query
+            + " "
+            + _operation_step_keywords(step_index)
+        )
+        evidence = _operation_step_evidence_lookup(
+            query_text=retrieval_query,
+            step_index=step_index,
+            limit=max(4, min(req.top_k, 6)),
+        )
+        result = {
+            "confidence": evidence[0]["scores"]["final"] if evidence else 0.0,
+            "latency_ms": int((perf_counter() - request_started_at) * 1000),
+            "retrieval_event_id": None,
+            "evidence": evidence,
+            "diagnostics": {
+                "pipeline": "operation_step_lookup",
+                "step_index": step_index,
+                "candidates": len(evidence),
+            },
+        }
+    else:
+        result = retriever.query(
+            query_text=retrieval_query,
+            language=req.language,
+            role=req.role,
+            user_id=req.user_id,
+            top_k=max(4, req.top_k),
+            revision_id=None,
+        )
+        evidence = result["evidence"]
+
+    if direct_answer is not None:
+        answer = direct_answer
+        response_evidence = direct_evidence
+    elif guide_mode == "clarify":
+        answer = _build_operation_clarifier(
+            query=req.query,
+            language=req.language,
+            evidence=evidence,
+        )
+        response_evidence = evidence[:3]
+    elif state.get("phase") == "running":
+        answer = _build_operation_run_checkpoint(
+            evidence=evidence,
+            language=req.language,
+            step_index=step_index,
+        )
+        response_evidence = evidence[:5]
+    else:
+        answer = await _generate_grounded_answer(
+            "Learning mode: explain the relevant procedure simply and clearly. " + req.query,
+            req.language,
+            evidence,
+            history=history,
+            chat_scope=normalized_scope,
+        )
+        response_evidence = evidence
+
+    retrieval_event_id = result.get("retrieval_event_id") or result.get("event_id")
+    if req.user_id:
+        serialized_citations = [QueryEvidence(**ev).model_dump() for ev in response_evidence]
+        with engine.begin() as conn:
+            _get_user(conn, req.user_id)
+            if conversation_id:
+                _get_chat_conversation(
+                    conn,
+                    conversation_id,
+                    req.user_id,
+                    chat_scope=normalized_scope,
+                )
+                _merge_conversation_metadata(
+                    conn,
+                    conversation_id,
+                    {"operation_state": state},
+                    chat_scope=normalized_scope,
+                )
+            else:
+                conversation = _create_chat_conversation(
+                    conn,
+                    user_id=req.user_id,
+                    language=req.language,
+                    title=_conversation_title_from_query(req.query),
+                    chat_scope=normalized_scope,
+                    metadata={
+                        "scope": normalized_scope,
+                        "pipeline": "operation_guide",
+                        "operation_state": state,
+                    },
+                )
+                conversation_id = conversation["id"]
+
+            _append_chat_message(
+                conn,
+                conversation_id=conversation_id,
+                role="user",
+                content=req.query,
+                language=req.language,
+                query_text=retrieval_query,
+                response_mode="operation",
+                chat_scope=normalized_scope,
+            )
+            _append_chat_message(
+                conn,
+                conversation_id=conversation_id,
+                role="assistant",
+                content=answer,
+                language=req.language,
+                citations=serialized_citations,
+                query_text=retrieval_query,
+                retrieval_event_id=retrieval_event_id,
+                response_mode="operation",
+                chat_scope=normalized_scope,
+            )
+            sop_code, _ = _extract_run_source(response_evidence)
+            run_record_id = _upsert_operation_run_record(
+                conn,
+                user_id=req.user_id,
+                conversation_id=conversation_id,
+                state=state,
+                evidence=response_evidence,
+            )
+            if state.get("phase") == "supervisor_handoff":
+                handoff_id = _create_supervisor_handoff(
+                    conn,
+                    user_id=req.user_id,
+                    conversation_id=conversation_id,
+                    run_record_id=run_record_id,
+                    state=state,
+                    reason=req.query,
+                )
+                if handoff_id:
+                    state["handoff_id"] = handoff_id
+                    _merge_conversation_metadata(
+                        conn,
+                        conversation_id,
+                        {"operation_state": state},
+                        chat_scope=normalized_scope,
+                    )
+            _upsert_worker_memory(
+                conn,
+                user_id=req.user_id,
+                language=req.language,
+                equipment=state.get("equipment"),
+                sop_code=sop_code,
+                skill_tags=[
+                    "operation guide",
+                    state.get("equipment"),
+                    state.get("task"),
+                    state.get("phase"),
+                    sop_code,
+                ],
+                risk_flags=["supervisor handoff"] if state.get("phase") == "supervisor_handoff" else [],
+            )
+            _record_worker_activity(
+                conn,
+                user_id=req.user_id,
+                event_type="operation_guide_step",
+                severity="medium" if state.get("phase") == "supervisor_handoff" else "info",
+                title=f"{_guided_state_label(state)} - {state.get('equipment') or 'equipment'}",
+                details={
+                    "conversation_id": conversation_id,
+                    "run_record_id": run_record_id,
+                    "phase": state.get("phase"),
+                    "step_index": state.get("step_index"),
+                    "equipment": state.get("equipment"),
+                    "task": state.get("task"),
+                    "sop_code": sop_code,
+                    "evidence": [
+                        {
+                            "document_code": item.get("document_code"),
+                            "page_start": item.get("page_start"),
+                            "citation_label": item.get("citation_label"),
+                        }
+                        for item in response_evidence[:5]
+                    ],
+                },
+                event_source="operation_guide",
+            )
+
+    total_latency_ms = int((perf_counter() - request_started_at) * 1000)
+    diagnostics = dict(result["diagnostics"])
+    diagnostics["pipeline"] = "operation_guide"
+    diagnostics["guide_mode"] = guide_mode
+    diagnostics["state_phase"] = state.get("phase")
+    diagnostics["guided_step_index"] = step_index
+    diagnostics["total_latency_ms"] = total_latency_ms
+
+    return OperationGuideResponse(
+        answer=answer,
+        mode=guide_mode,
+        next_actions=_guided_next_actions_for_state(state, req.language),
+        state=state,
+        state_label=_guided_state_label(state),
+        step_index=int(state.get("step_index") or step_index) if state else step_index,
+        requires_supervisor=bool(state.get("requires_supervisor") or state.get("phase") == "supervisor_handoff"),
+        completion_record_id=state.get("completion_record_id"),
+        confidence=float(result["confidence"]),
+        latency_ms=total_latency_ms,
+        retrieval_event_id=retrieval_event_id,
+        conversation_id=conversation_id,
+        evidence=[QueryEvidence(**ev) for ev in response_evidence],
+        diagnostics=diagnostics,
+    )
+
+
 @app.post("/api/query", response_model=QueryResponse)
 async def grounded_query(req: QueryRequest):
     request_started_at = perf_counter()
@@ -3085,6 +4795,8 @@ async def grounded_query(req: QueryRequest):
     effective_top_k = max(3, req.top_k)
     if normalized_scope == "reader" and _is_summary_style_query(req.query):
         effective_top_k = max(effective_top_k, 12)
+    elif normalized_scope == "reader":
+        effective_top_k = min(effective_top_k, 5)
 
     result = retriever.query(
         query_text=rewritten_query,
@@ -3176,6 +4888,338 @@ async def grounded_query(req: QueryRequest):
         conversation_id=conversation_id,
         evidence=[QueryEvidence(**ev) for ev in response_evidence],
         diagnostics=diagnostics,
+    )
+
+
+@app.post("/api/query/stream")
+async def grounded_query_stream(req: QueryRequest):
+    async def event_stream():
+        try:
+            request_started_at = perf_counter()
+            normalized_scope = _normalize_chat_scope(req.chat_scope)
+            if req.conversation_id and not req.user_id:
+                yield _sse_event("error", {"message": "user_id is required with conversation_id", "status": 400})
+                return
+
+            initial_status = (
+                "Analyzing your document"
+                if normalized_scope == "reader"
+                else "Verifying your request"
+            )
+            yield _sse_event("status", {"message": initial_status})
+            await asyncio.sleep(0.18 if normalized_scope == "reader" else 0)
+
+            conversation_metadata: dict[str, Any] = {}
+            if normalized_scope == "reader" and req.revision_id:
+                conversation_metadata["revision_id"] = req.revision_id
+            history: list[dict[str, str]] = []
+            conversation_id = req.conversation_id
+
+            if req.user_id:
+                with engine.connect() as conn:
+                    _get_user(conn, req.user_id)
+                    if conversation_id:
+                        conversation_scope = _detect_chat_scope_for_conversation(
+                            conn, conversation_id, req.user_id
+                        )
+                        if not conversation_scope:
+                            yield _sse_event("error", {"message": "Conversation not found", "status": 404})
+                            return
+                        if conversation_scope != normalized_scope:
+                            yield _sse_event(
+                                "error",
+                                {
+                                    "message": (
+                                        "Conversation scope mismatch. "
+                                        f"Expected '{normalized_scope}', found '{conversation_scope}'."
+                                    ),
+                                    "status": 409,
+                                },
+                            )
+                            return
+                        conversation = _get_chat_conversation(
+                            conn,
+                            conversation_id,
+                            req.user_id,
+                            chat_scope=normalized_scope,
+                        )
+                        if (
+                            normalized_scope == "reader"
+                            and req.revision_id
+                            and conversation.get("revision_id")
+                            and conversation.get("revision_id") != req.revision_id
+                        ):
+                            yield _sse_event(
+                                "error",
+                                {
+                                    "message": "Reader conversation revision mismatch. Start a new reader conversation for this document.",
+                                    "status": 409,
+                                },
+                            )
+                            return
+                        history = _history_from_messages(
+                            _get_chat_messages(conn, conversation_id, chat_scope=normalized_scope)
+                        )
+
+            guardrail_decision = evaluate_guardrail(req.query)
+            if guardrail_decision.blocked:
+                response = await grounded_query(req)
+                for chunk in _stream_text_chunks(response.answer):
+                    yield _sse_event("answer_delta", {"text": chunk})
+                    await asyncio.sleep(0.012)
+                yield _sse_event("final", response.model_dump())
+                return
+
+            yield _sse_event(
+                "status",
+                {
+                    "message": (
+                        "Scanning relevant sections"
+                        if normalized_scope == "reader"
+                        else "Searching approved sources"
+                    )
+                },
+            )
+            await asyncio.sleep(0.18 if normalized_scope == "reader" else 0)
+
+            contextual_query = _build_contextual_query(req.query, history)
+            rewritten_query = contextual_query
+            rewrite_result = None
+            if _should_use_query_rewrite(
+                req.query,
+                history,
+                chat_scope=normalized_scope,
+            ):
+                rewrite_result = await _run_blocking_with_timeout(
+                    DSPY_REWRITE_TIMEOUT_SECONDS,
+                    rewrite_query_with_dspy,
+                    contextual_query,
+                    language=req.language,
+                    role=req.role or "operator",
+                    history=history,
+                )
+            if rewrite_result and rewrite_result.get("rewritten_query"):
+                rewritten_query = rewrite_result["rewritten_query"]
+
+            effective_top_k = max(3, req.top_k)
+            if normalized_scope == "reader" and _is_summary_style_query(req.query):
+                effective_top_k = max(effective_top_k, 12)
+            elif normalized_scope == "reader":
+                effective_top_k = min(effective_top_k, 5)
+
+            yield _sse_event(
+                "status",
+                {
+                    "message": (
+                        "Cross-referencing with document evidence"
+                        if normalized_scope == "reader"
+                        else "Selecting the most relevant evidence"
+                    )
+                },
+            )
+            await asyncio.sleep(0.18 if normalized_scope == "reader" else 0)
+            result = retriever.query(
+                query_text=rewritten_query,
+                language=req.language,
+                role=req.role,
+                user_id=req.user_id,
+                top_k=effective_top_k,
+                revision_id=req.revision_id,
+            )
+            evidence = result["evidence"]
+            if normalized_scope == "reader":
+                yield _sse_event(
+                    "status",
+                    {
+                        "message": _source_status_from_evidence(
+                            evidence,
+                            fallback="Reviewing evidence from this document",
+                        )
+                    },
+                )
+                await asyncio.sleep(0.18)
+            clarification_answer = _build_document_clarification_answer(
+                req.query,
+                evidence,
+                req.language,
+                normalized_scope,
+            )
+
+            answer = ""
+            response_evidence: list[dict[str, Any]]
+            can_stream_primary = (
+                normalized_scope in ("general", "reader", "guided")
+                and not clarification_answer
+                and bool(evidence)
+                and settings.has_primary_llm_credentials
+                and not _should_prefer_extractive_answer(req.query, evidence)
+            )
+
+            if clarification_answer:
+                answer = clarification_answer
+                response_evidence = []
+                yield _sse_event(
+                    "status",
+                    {
+                        "message": (
+                            "One quick clarification needed"
+                            if normalized_scope == "reader"
+                            else "One quick clarification needed"
+                        )
+                    },
+                )
+                await asyncio.sleep(0.12 if normalized_scope == "reader" else 0)
+                clarification_chunk_size = 14 if normalized_scope == "reader" else 24
+                clarification_delay = 0.045 if normalized_scope == "reader" else 0.012
+                for chunk in _stream_text_chunks(answer, max_chars=clarification_chunk_size):
+                    yield _sse_event("answer_delta", {"text": chunk})
+                    await asyncio.sleep(clarification_delay)
+            elif can_stream_primary:
+                yield _sse_event("status", {"message": "Generating your answer"})
+                system_prompt, user_prompt, max_tokens = _build_grounded_chat_prompt(
+                    req.query,
+                    req.language,
+                    evidence,
+                    history=history,
+                    chat_scope=normalized_scope,
+                )
+                answer_parts: list[str] = []
+                try:
+                    async for token in _stream_primary_chat_model(
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        max_tokens=max_tokens,
+                    ):
+                        answer_parts.append(token)
+                        yield _sse_event("answer_delta", {"text": token})
+                    answer = "".join(answer_parts).strip()
+                except Exception:
+                    answer = ""
+                if not answer:
+                    answer = await _generate_grounded_answer(
+                        req.query,
+                        req.language,
+                        evidence,
+                        history=history,
+                        chat_scope=normalized_scope,
+                    )
+                    for chunk in _stream_text_chunks(answer):
+                        yield _sse_event("answer_delta", {"text": chunk})
+                        await asyncio.sleep(0.012)
+                response_evidence = evidence
+            else:
+                yield _sse_event(
+                    "status",
+                    {
+                        "message": (
+                            "Composing your answer from the evidence"
+                            if normalized_scope == "reader"
+                            else "Building a grounded response"
+                        )
+                    },
+                )
+                await asyncio.sleep(0.15 if normalized_scope == "reader" else 0)
+                answer = await _generate_grounded_answer(
+                    req.query,
+                    req.language,
+                    evidence,
+                    history=history,
+                    chat_scope=normalized_scope,
+                )
+                response_evidence = evidence
+                stream_chunk_size = 12 if normalized_scope == "reader" else 24
+                stream_delay = 0.045 if normalized_scope == "reader" else 0.012
+                for chunk in _stream_text_chunks(answer, max_chars=stream_chunk_size):
+                    yield _sse_event("answer_delta", {"text": chunk})
+                    await asyncio.sleep(stream_delay)
+
+            retrieval_event_id = result.get("retrieval_event_id") or result.get("event_id")
+            if req.user_id:
+                serialized_citations = [QueryEvidence(**ev).model_dump() for ev in response_evidence]
+                with engine.begin() as conn:
+                    _get_user(conn, req.user_id)
+                    if conversation_id:
+                        _get_chat_conversation(
+                            conn,
+                            conversation_id,
+                            req.user_id,
+                            chat_scope=normalized_scope,
+                        )
+                    else:
+                        conversation = _create_chat_conversation(
+                            conn,
+                            user_id=req.user_id,
+                            language=req.language,
+                            title=_conversation_title_from_query(req.query),
+                            chat_scope=normalized_scope,
+                            metadata=conversation_metadata,
+                        )
+                        conversation_id = conversation["id"]
+
+                    _append_chat_message(
+                        conn,
+                        conversation_id=conversation_id,
+                        role="user",
+                        content=req.query,
+                        language=req.language,
+                        query_text=rewritten_query,
+                        response_mode="text",
+                        chat_scope=normalized_scope,
+                    )
+                    _append_chat_message(
+                        conn,
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content=answer,
+                        language=req.language,
+                        citations=serialized_citations,
+                        query_text=rewritten_query,
+                        retrieval_event_id=retrieval_event_id,
+                        response_mode="text",
+                        chat_scope=normalized_scope,
+                    )
+
+            total_latency_ms = int((perf_counter() - request_started_at) * 1000)
+            diagnostics = dict(result["diagnostics"])
+            diagnostics["retrieval_latency_ms"] = int(result["latency_ms"])
+            diagnostics["total_latency_ms"] = total_latency_ms
+            diagnostics["streaming"] = "primary_llm_tokens" if can_stream_primary else "server_chunks"
+            diagnostics["source_panel_policy"] = (
+                "clarification_required" if clarification_answer else "answer_grounded"
+            )
+            response = QueryResponse(
+                answer=answer,
+                confidence=float(result["confidence"]),
+                latency_ms=total_latency_ms,
+                retrieval_event_id=retrieval_event_id,
+                conversation_id=conversation_id,
+                evidence=[QueryEvidence(**ev) for ev in response_evidence],
+                diagnostics=diagnostics,
+            )
+            yield _sse_event(
+                "status",
+                {
+                    "message": (
+                        f"Answer ready in {max(1, int(response.latency_ms / 1000))}s"
+                        if response.latency_ms
+                        else "Answer ready"
+                    )
+                },
+            )
+            yield _sse_event("final", response.model_dump())
+        except HTTPException as exc:
+            yield _sse_event("error", {"message": exc.detail, "status": exc.status_code})
+        except Exception:
+            yield _sse_event("error", {"message": "Could not complete the query."})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

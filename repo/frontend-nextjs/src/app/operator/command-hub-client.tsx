@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AppLanguage, useAuth } from "@/lib/auth-context";
 import { trackEvent } from "@/lib/telemetry";
-import { apiClient, API_BASE_URL } from "@/lib/api";
+import { apiClient, API_BASE_URL, postJsonSse } from "@/lib/api";
 import {
   DocumentStackIcon,
   MicPulseIcon,
@@ -93,6 +93,19 @@ type QueryApiResponse = {
   evidence?: QueryEvidencePayload[];
 };
 
+type OperationGuideApiResponse = {
+  answer: string;
+  mode: "clarify" | "learn" | "run" | "blocked";
+  next_actions?: string[];
+  state?: Record<string, unknown>;
+  state_label?: string | null;
+  step_index?: number | null;
+  requires_supervisor?: boolean;
+  completion_record_id?: string | null;
+  conversation_id?: string;
+  evidence?: QueryEvidencePayload[];
+};
+
 type TranslationApiResponse = {
   translated_text: string;
   source_language: string;
@@ -142,7 +155,7 @@ type ConversationSummaryPayload = {
   title: string;
   language: string;
   status: string;
-  chat_scope?: "general" | "reader";
+  chat_scope?: "general" | "reader" | "guided";
   revision_id?: string | null;
   message_count: number;
   preview?: string | null;
@@ -181,6 +194,13 @@ type ChatMessage = {
   audioBase64?: string;
   audioMimeType?: string;
   ttsLanguage?: string | null;
+  nextActions?: string[];
+  isStreaming?: boolean;
+  streamStatus?: string | null;
+  operationStateLabel?: string | null;
+  operationStepIndex?: number | null;
+  requiresSupervisor?: boolean;
+  completionRecordId?: string | null;
 };
 
 type DashboardSummaryResponse = {
@@ -205,6 +225,34 @@ type DashboardSummaryResponse = {
     revision_label?: string | null;
     updated_at?: string | null;
   }[];
+};
+
+type WorkerBriefItem = {
+  type: string;
+  priority?: string;
+  title: string;
+  detail?: string | null;
+  cta_url?: string | null;
+  document_code?: string | null;
+  revision_label?: string | null;
+  updated_at?: string | null;
+  due_at?: string | null;
+  created_at?: string | null;
+};
+
+type WorkerBriefResponse = {
+  memory?: {
+    preferred_language?: string | null;
+    skill_tags?: string[];
+    risk_flags?: string[];
+    last_equipment?: string | null;
+    last_sop_code?: string | null;
+    interaction_count?: number;
+    last_interaction_at?: string | null;
+  };
+  today?: WorkerBriefItem[];
+  open_handoffs?: WorkerBriefItem[];
+  recent_activity?: WorkerBriefItem[];
 };
 
 type LookupCopy = {
@@ -264,7 +312,7 @@ type TextSegment = {
 };
 
 type VoiceState = "idle" | "recording" | "processing" | "playing";
-type ConversationScope = "general" | "reader";
+type ConversationScope = "general" | "reader" | "guided";
 
 function normalizeApiAssetUrl(url?: string | null) {
   if (!url) return null;
@@ -290,8 +338,11 @@ function conversationScopeLabel(
   language: AppLanguage,
   scope: ConversationScope,
 ) {
+  if (scope === "guided") {
+    return "Run Guide";
+  }
   if (language === "HIN") {
-    return scope === "general" ? "सामान्य" : "रीडर";
+    return scope === "general" ? "à¤¸à¤¾à¤®à¤¾à¤¨à¥à¤¯" : "à¤°à¥€à¤¡à¤°";
   }
   return scope === "general" ? "General" : "Reader";
 }
@@ -303,7 +354,7 @@ function conversationThreadSummary(
 ) {
   const scopeText = conversationScopeLabel(language, scope);
   if (language === "HIN") {
-    return `${count} ${scopeText} थ्रेड`;
+    return `${count} ${scopeText} à¤¥à¥à¤°à¥‡à¤¡`;
   }
   if (language === "HING") {
     return `${count} ${scopeText} thread`;
@@ -313,7 +364,7 @@ function conversationThreadSummary(
 
 function readerThreadsHint(language: AppLanguage) {
   if (language === "HIN") {
-    return "अभी कोई रीडर थ्रेड नहीं है। सामान्य चैट इतिहास सामान्य टैब में है।";
+    return "à¤…à¤­à¥€ à¤•à¥‹à¤ˆ à¤°à¥€à¤¡à¤° à¤¥à¥à¤°à¥‡à¤¡ à¤¨à¤¹à¥€à¤‚ à¤¹à¥ˆà¥¤ à¤¸à¤¾à¤®à¤¾à¤¨à¥à¤¯ à¤šà¥ˆà¤Ÿ à¤‡à¤¤à¤¿à¤¹à¤¾à¤¸ à¤¸à¤¾à¤®à¤¾à¤¨à¥à¤¯ à¤Ÿà¥ˆà¤¬ à¤®à¥‡à¤‚ à¤¹à¥ˆà¥¤";
   }
   if (language === "HING") {
     return "Abhi koi reader thread nahi hai. General chat history General tab me hai.";
@@ -322,26 +373,26 @@ function readerThreadsHint(language: AppLanguage) {
 }
 
 function openReaderLabel(language: AppLanguage) {
-  if (language === "HIN") return "रीडर खोलें";
+  if (language === "HIN") return "à¤°à¥€à¤¡à¤° à¤–à¥‹à¤²à¥‡à¤‚";
   if (language === "HING") return "Reader kholo";
   return "Open Reader";
 }
 
 function readerContinueHint(language: AppLanguage) {
-  if (language === "HIN") return "आगे बढ़ने के लिए रीडर में खोलें।";
+  if (language === "HIN") return "à¤†à¤—à¥‡ à¤¬à¤¢à¤¼à¤¨à¥‡ à¤•à¥‡ à¤²à¤¿à¤ à¤°à¥€à¤¡à¤° à¤®à¥‡à¤‚ à¤–à¥‹à¤²à¥‡à¤‚à¥¤";
   if (language === "HING") return "Continue karne ke liye Reader me kholo.";
   return "Open in Reader workspace to continue.";
 }
 
 function generalContinueHint(language: AppLanguage) {
-  if (language === "HIN") return "इस बातचीत को आगे जारी रखें।";
+  if (language === "HIN") return "à¤‡à¤¸ à¤¬à¤¾à¤¤à¤šà¥€à¤¤ à¤•à¥‹ à¤†à¤—à¥‡ à¤œà¤¾à¤°à¥€ à¤°à¤–à¥‡à¤‚à¥¤";
   if (language === "HING") return "Is conversation ko aage continue karo.";
   return "Ready to continue this conversation.";
 }
 
 function readerEmptyHint(language: AppLanguage) {
   if (language === "HIN") {
-    return "अभी कोई रीडर थ्रेड नहीं है। दस्तावेज से रीडर खोलकर नया थ्रेड बनाएं।";
+    return "à¤…à¤­à¥€ à¤•à¥‹à¤ˆ à¤°à¥€à¤¡à¤° à¤¥à¥à¤°à¥‡à¤¡ à¤¨à¤¹à¥€à¤‚ à¤¹à¥ˆà¥¤ à¤¦à¤¸à¥à¤¤à¤¾à¤µà¥‡à¤œ à¤¸à¥‡ à¤°à¥€à¤¡à¤° à¤–à¥‹à¤²à¤•à¤° à¤¨à¤¯à¤¾ à¤¥à¥à¤°à¥‡à¤¡ à¤¬à¤¨à¤¾à¤à¤‚à¥¤";
   }
   if (language === "HING") {
     return "Abhi koi reader thread nahi hai. Document se Reader kholo aur naya thread banao.";
@@ -349,40 +400,74 @@ function readerEmptyHint(language: AppLanguage) {
   return "No reader threads yet. Open Reader from a document to create one.";
 }
 
+function guidedEmptyHint(language: AppLanguage) {
+  if (language === "HING") {
+    return "Abhi koi Run Guide thread nahi hai. Naya guide start karo.";
+  }
+  return "No run guide threads yet. Start a new guided operation.";
+}
+
+function startGuidedLabel(language: AppLanguage) {
+  if (language === "HING") return "Guide shuru karo";
+  return "Start Guide";
+}
+
+function operationStatusLabel(message: ChatMessage) {
+  if (message.requiresSupervisor) return "Supervisor help";
+  if (message.completionRecordId) return "Completed";
+  if (!message.operationStateLabel) return null;
+  const normalized = message.operationStateLabel.toLowerCase();
+  if (normalized.includes("learning")) return "Learning";
+  if (normalized.includes("pre-check")) return "Pre-checks";
+  if (normalized.includes("live")) return "Live guide";
+  if (normalized.includes("task")) return "Task setup";
+  return null;
+}
+
+function shouldShowOperationStep(message: ChatMessage) {
+  return (
+    message.responseMode === "operation" &&
+    !message.requiresSupervisor &&
+    !message.completionRecordId &&
+    Boolean(message.operationStateLabel?.toLowerCase().includes("live")) &&
+    Boolean(message.operationStepIndex)
+  );
+}
+
 function shiftCommandLabel(language: AppLanguage) {
-  if (language === "HIN") return "शिफ्ट कमान्ड";
+  if (language === "HIN") return "à¤¶à¤¿à¤«à¥à¤Ÿ à¤•à¤®à¤¾à¤¨à¥à¤¡";
   if (language === "HING") return "Shift command";
   return "Shift Command";
 }
 
 function latestRevisionLabel(language: AppLanguage) {
-  if (language === "HIN") return "नया रिविजन";
+  if (language === "HIN") return "à¤¨à¤¯à¤¾ à¤°à¤¿à¤µà¤¿à¤œà¤¨";
   if (language === "HING") return "Latest revision";
   return "Latest Revision";
 }
 
 function noDocumentLabel(language: AppLanguage) {
-  if (language === "HIN") return "कोई दस्तावेज नहीं";
+  if (language === "HIN") return "à¤•à¥‹à¤ˆ à¤¦à¤¸à¥à¤¤à¤¾à¤µà¥‡à¤œ à¤¨à¤¹à¥€à¤‚";
   if (language === "HING") return "Koi document nahi";
   return "No document";
 }
 
 function noApprovedRevisionLabel(language: AppLanguage) {
-  if (language === "HIN") return "अभी कोई अनुमोदित रिविजन नहीं मिला।";
+  if (language === "HIN") return "à¤…à¤­à¥€ à¤•à¥‹à¤ˆ à¤…à¤¨à¥à¤®à¥‹à¤¦à¤¿à¤¤ à¤°à¤¿à¤µà¤¿à¤œà¤¨ à¤¨à¤¹à¥€à¤‚ à¤®à¤¿à¤²à¤¾à¥¤";
   if (language === "HING") return "Abhi koi approved revision nahi mila.";
   return "No approved revision found yet.";
 }
 
 function generatingResponseLabel(language: AppLanguage) {
-  if (language === "HIN") return "जवाब बन रहा है...";
+  if (language === "HIN") return "à¤œà¤µà¤¾à¤¬ à¤¬à¤¨ à¤°à¤¹à¤¾ à¤¹à¥ˆ...";
   if (language === "HING") return "Answer ban raha hai...";
   return "Generating response...";
 }
 
 function backToHubLabel(language: AppLanguage) {
-  if (language === "HIN") return "← कमान्ड हब पर वापस";
-  if (language === "HING") return "← Command Hub par wapas";
-  return "← Back to Command Hub";
+  if (language === "HIN") return "â† à¤•à¤®à¤¾à¤¨à¥à¤¡ à¤¹à¤¬ à¤ªà¤° à¤µà¤¾à¤ªà¤¸";
+  if (language === "HING") return "â† Command Hub par wapas";
+  return "â† Back to Command Hub";
 }
 
 function shouldAutoOpenSourcePanel(query: string, citations: CitationType[]) {
@@ -739,37 +824,37 @@ const COPY: Record<AppLanguage, LookupCopy> = {
     features: ["Voice query", "Hindi/Hinglish", "Exact source text"],
   },
   HIN: {
-    title: "SOP पूछें, सही उत्तर पाएं",
+    title: "SOP à¤ªà¥‚à¤›à¥‡à¤‚, à¤¸à¤¹à¥€ à¤‰à¤¤à¥à¤¤à¤° à¤ªà¤¾à¤à¤‚",
     subtitle:
-      "प्रश्न टाइप करें या बोलें। उत्तर केवल अनुमोदित दस्तावेजों से मिलेगा।",
-    placeholder: "प्रक्रिया, सुरक्षा स्टेप, मशीन ऑपरेशन पूछें...",
-    followUpPlaceholder: "अगला प्रश्न पूछें...",
-    askButton: "पूछें",
+      "à¤ªà¥à¤°à¤¶à¥à¤¨ à¤Ÿà¤¾à¤‡à¤ª à¤•à¤°à¥‡à¤‚ à¤¯à¤¾ à¤¬à¥‹à¤²à¥‡à¤‚à¥¤ à¤‰à¤¤à¥à¤¤à¤° à¤•à¥‡à¤µà¤² à¤…à¤¨à¥à¤®à¥‹à¤¦à¤¿à¤¤ à¤¦à¤¸à¥à¤¤à¤¾à¤µà¥‡à¤œà¥‹à¤‚ à¤¸à¥‡ à¤®à¤¿à¤²à¥‡à¤—à¤¾à¥¤",
+    placeholder: "à¤ªà¥à¤°à¤•à¥à¤°à¤¿à¤¯à¤¾, à¤¸à¥à¤°à¤•à¥à¤·à¤¾ à¤¸à¥à¤Ÿà¥‡à¤ª, à¤®à¤¶à¥€à¤¨ à¤‘à¤ªà¤°à¥‡à¤¶à¤¨ à¤ªà¥‚à¤›à¥‡à¤‚...",
+    followUpPlaceholder: "à¤…à¤—à¤²à¤¾ à¤ªà¥à¤°à¤¶à¥à¤¨ à¤ªà¥‚à¤›à¥‡à¤‚...",
+    askButton: "à¤ªà¥‚à¤›à¥‡à¤‚",
     voiceStartAction: "Voice shuru karein",
     voiceStopRecordingAction: "Rok kar bhejein",
     voiceCancelProcessingAction: "Radd karein",
     voiceStopPlaybackAction: "Audio rokein",
     voiceReady: "Ek baar tap karke bolna shuru karein. Dobara tap karke bhejein.",
-    listening: "सुन रहा है। अभी बोलें।",
+    listening: "à¤¸à¥à¤¨ à¤°à¤¹à¤¾ à¤¹à¥ˆà¥¤ à¤…à¤­à¥€ à¤¬à¥‹à¤²à¥‡à¤‚à¥¤",
     voiceProcessing: "Voice query process ho rahi hai. Radd karne ke liye tap karein.",
     voicePlaying: "Voice jawab baj raha hai. Audio rokne ke liye tap karein.",
-    conversation: "बातचीत",
-    sources: "स्रोत",
-    sourceDoc: "स्रोत दस्तावेज",
-    noDocTitle: "कोई स्रोत चयनित नहीं",
-    noDocHint: "सही टेक्स्ट देखने के लिए स्रोत चिप पर क्लिक करें।",
-    loadDoc: "दस्तावेज लोड हो रहा है...",
-    assistantTag: "सहायक",
-    chunkTag: "मिला हुआ भाग",
-    sourceProofLabel: "स्रोत प्रमाण",
-    voiceError: "वॉइस क्वेरी नहीं चली। फिर से कोशिश करें।",
-    queryError: "अभी बैकएंड से कनेक्ट नहीं हो पाया।",
-    voiceUnsupported: "इस ब्राउजर में वॉइस इनपुट उपलब्ध नहीं है।",
-    newChat: "नई चैट",
-    recentChats: "पुरानी चैट",
-    noChats: "अभी कोई सेव चैट नहीं है।",
-    loadingChats: "सेव चैट लोड हो रही है...",
-    features: ["वॉइस क्वेरी", "हिंदी/हिंग्लिश", "स्रोत प्रमाण"],
+    conversation: "à¤¬à¤¾à¤¤à¤šà¥€à¤¤",
+    sources: "à¤¸à¥à¤°à¥‹à¤¤",
+    sourceDoc: "à¤¸à¥à¤°à¥‹à¤¤ à¤¦à¤¸à¥à¤¤à¤¾à¤µà¥‡à¤œ",
+    noDocTitle: "à¤•à¥‹à¤ˆ à¤¸à¥à¤°à¥‹à¤¤ à¤šà¤¯à¤¨à¤¿à¤¤ à¤¨à¤¹à¥€à¤‚",
+    noDocHint: "à¤¸à¤¹à¥€ à¤Ÿà¥‡à¤•à¥à¤¸à¥à¤Ÿ à¤¦à¥‡à¤–à¤¨à¥‡ à¤•à¥‡ à¤²à¤¿à¤ à¤¸à¥à¤°à¥‹à¤¤ à¤šà¤¿à¤ª à¤ªà¤° à¤•à¥à¤²à¤¿à¤• à¤•à¤°à¥‡à¤‚à¥¤",
+    loadDoc: "à¤¦à¤¸à¥à¤¤à¤¾à¤µà¥‡à¤œ à¤²à¥‹à¤¡ à¤¹à¥‹ à¤°à¤¹à¤¾ à¤¹à¥ˆ...",
+    assistantTag: "à¤¸à¤¹à¤¾à¤¯à¤•",
+    chunkTag: "à¤®à¤¿à¤²à¤¾ à¤¹à¥à¤† à¤­à¤¾à¤—",
+    sourceProofLabel: "à¤¸à¥à¤°à¥‹à¤¤ à¤ªà¥à¤°à¤®à¤¾à¤£",
+    voiceError: "à¤µà¥‰à¤‡à¤¸ à¤•à¥à¤µà¥‡à¤°à¥€ à¤¨à¤¹à¥€à¤‚ à¤šà¤²à¥€à¥¤ à¤«à¤¿à¤° à¤¸à¥‡ à¤•à¥‹à¤¶à¤¿à¤¶ à¤•à¤°à¥‡à¤‚à¥¤",
+    queryError: "à¤…à¤­à¥€ à¤¬à¥ˆà¤•à¤à¤‚à¤¡ à¤¸à¥‡ à¤•à¤¨à¥‡à¤•à¥à¤Ÿ à¤¨à¤¹à¥€à¤‚ à¤¹à¥‹ à¤ªà¤¾à¤¯à¤¾à¥¤",
+    voiceUnsupported: "à¤‡à¤¸ à¤¬à¥à¤°à¤¾à¤‰à¤œà¤° à¤®à¥‡à¤‚ à¤µà¥‰à¤‡à¤¸ à¤‡à¤¨à¤ªà¥à¤Ÿ à¤‰à¤ªà¤²à¤¬à¥à¤§ à¤¨à¤¹à¥€à¤‚ à¤¹à¥ˆà¥¤",
+    newChat: "à¤¨à¤ˆ à¤šà¥ˆà¤Ÿ",
+    recentChats: "à¤ªà¥à¤°à¤¾à¤¨à¥€ à¤šà¥ˆà¤Ÿ",
+    noChats: "à¤…à¤­à¥€ à¤•à¥‹à¤ˆ à¤¸à¥‡à¤µ à¤šà¥ˆà¤Ÿ à¤¨à¤¹à¥€à¤‚ à¤¹à¥ˆà¥¤",
+    loadingChats: "à¤¸à¥‡à¤µ à¤šà¥ˆà¤Ÿ à¤²à¥‹à¤¡ à¤¹à¥‹ à¤°à¤¹à¥€ à¤¹à¥ˆ...",
+    features: ["à¤µà¥‰à¤‡à¤¸ à¤•à¥à¤µà¥‡à¤°à¥€", "à¤¹à¤¿à¤‚à¤¦à¥€/à¤¹à¤¿à¤‚à¤—à¥à¤²à¤¿à¤¶", "à¤¸à¥à¤°à¥‹à¤¤ à¤ªà¥à¤°à¤®à¤¾à¤£"],
   },
   HING: {
     title: "SOP pucho, exact answer lo",
@@ -891,6 +976,9 @@ export default function InformationLookup() {
   const [isQuerying, setIsQuerying] = useState(false);
   const [dashboardData, setDashboardData] =
     useState<DashboardSummaryResponse | null>(null);
+  const [workerBrief, setWorkerBrief] = useState<WorkerBriefResponse | null>(
+    null,
+  );
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [activeAudioMessageId, setActiveAudioMessageId] = useState<
     string | null
@@ -944,6 +1032,7 @@ export default function InformationLookup() {
   useEffect(() => {
     if (!user?.id) {
       setDashboardData(null);
+      setWorkerBrief(null);
       return;
     }
 
@@ -954,12 +1043,17 @@ export default function InformationLookup() {
         const payload = (await apiClient.get(
           `/api/dashboard/summary?user_id=${encodeURIComponent(user.id)}`,
         )) as DashboardSummaryResponse;
+        const brief = (await apiClient.get(
+          `/api/worker/brief?user_id=${encodeURIComponent(user.id)}`,
+        )) as WorkerBriefResponse;
         if (!cancelled) {
           setDashboardData(payload);
+          setWorkerBrief(brief);
         }
       } catch {
         if (!cancelled) {
           setDashboardData(null);
+          setWorkerBrief(null);
         }
       } finally {
         if (!cancelled) {
@@ -992,7 +1086,7 @@ export default function InformationLookup() {
         const items = await refreshConversations(conversationScopeTab);
         if (cancelled) return;
 
-        if (conversationScopeTab !== "general") {
+        if (conversationScopeTab === "reader") {
           setActiveConversationId(null);
           setChatMessages([]);
           setIsFreshChatOpen(false);
@@ -1104,13 +1198,16 @@ export default function InformationLookup() {
     }
   }
 
-  async function loadConversation(conversationId: string) {
+  async function loadConversation(
+    conversationId: string,
+    scope: ConversationScope = conversationScopeTab,
+  ) {
     if (!user?.id) return;
 
     setIsConversationLoading(true);
     try {
       const payload = (await apiClient.get(
-        `/api/conversations/${conversationId}?user_id=${encodeURIComponent(user.id)}&scope=general`,
+        `/api/conversations/${conversationId}?user_id=${encodeURIComponent(user.id)}&scope=${scope}`,
       )) as ConversationDetailPayload;
       const mappedMessages = payload.messages.map(mapConversationMessage);
       setActiveConversationId(payload.conversation.id);
@@ -1138,7 +1235,25 @@ export default function InformationLookup() {
 
     conversationsBootstrappedRef.current = true;
     setActiveConversationId(null);
-    setChatMessages([]);
+    setChatMessages(
+      conversationScopeTab === "guided"
+        ? [
+            {
+              id: createLocalMessageId("guided-intro"),
+              role: "assistant",
+              content:
+                "Tell me the equipment and task. Example: how to start centrifugal pump. I will ask whether you want to run it now or learn first.",
+              language: toQueryLanguage(language),
+              responseMode: "operation",
+              nextActions: [
+                "How to start centrifugal pump",
+                "Run centrifugal pump now",
+                "Learn centrifugal pump startup",
+              ],
+            },
+          ]
+        : [],
+    );
     setIsFreshChatOpen(true);
     setIsConversationViewOpen(true);
     setSearchQuery("");
@@ -1597,57 +1712,153 @@ export default function InformationLookup() {
         content: currentQuery,
         language: requestLanguageOverride ?? toQueryLanguage(language),
       },
+      {
+        id: assistantMessageId,
+        role: "assistant",
+        content: "",
+        citations: [],
+        language: requestLanguageOverride ?? toQueryLanguage(language),
+        ttsText: "",
+        responseMode: conversationScopeTab === "guided" ? "operation" : "text",
+        isStreaming: true,
+        streamStatus: "Verifying your request",
+      },
     ]);
     setSearchQuery("");
     setIsQuerying(true);
 
     try {
-      const response = (await apiClient.post("/api/query", {
-        query: currentQuery,
-        language: requestLanguageOverride ?? toQueryLanguage(language),
-        role: "operator",
-        user_id: user?.id,
-        conversation_id: activeConversationId,
-        chat_scope: "general",
-        top_k: 5,
-      })) as QueryApiResponse;
+      const requestLanguage = requestLanguageOverride ?? toQueryLanguage(language);
+      const isGuidedMode = conversationScopeTab === "guided";
 
-      const citations = (response.evidence || []).map(mapCitationPayload);
-      const nextConversationId =
-        response.conversation_id || activeConversationId || null;
-      setChatMessages((prev) => [
-        ...prev,
-        {
+      if (isGuidedMode) {
+        // Guided mode: use /api/operation-guide for state machine
+        updateChatMessage(assistantMessageId, (current) => ({
+          ...current,
+          streamStatus: "Preparing the run guide",
+        }));
+        const guidedResponse = (await apiClient.post(
+          "/api/operation-guide",
+          {
+            query: currentQuery,
+            language: requestLanguage,
+            role: "operator",
+            user_id: user?.id,
+            conversation_id: activeConversationId,
+            chat_scope: "guided",
+            top_k: 6,
+          },
+        )) as OperationGuideApiResponse;
+        const guidedCitations = (guidedResponse.evidence || []).map(mapCitationPayload);
+        const guidedConversationId =
+          guidedResponse.conversation_id || activeConversationId || null;
+        updateChatMessage(assistantMessageId, () => ({
           id: assistantMessageId,
           role: "assistant",
-          content: response.answer,
-          citations: citations.length > 0 ? citations : undefined,
-          language: requestLanguageOverride ?? toQueryLanguage(language),
-          ttsText: response.answer,
-        },
-      ]);
-      if (nextConversationId) {
-        setActiveConversationId(nextConversationId);
-        void refreshConversations("general", nextConversationId);
-      }
-
-      if (shouldAutoOpenSourcePanel(currentQuery, citations)) {
-        void loadCitation(citations[0]);
+          content: guidedResponse.answer,
+          citations: guidedCitations.length > 0 ? guidedCitations : undefined,
+          language: requestLanguage,
+          ttsText: guidedResponse.answer,
+          responseMode: "operation",
+          nextActions: guidedResponse.next_actions || [],
+          operationStateLabel: guidedResponse.state_label || null,
+          operationStepIndex: guidedResponse.step_index || null,
+          requiresSupervisor: Boolean(guidedResponse.requires_supervisor),
+          completionRecordId: guidedResponse.completion_record_id || null,
+          isStreaming: false,
+          streamStatus: null,
+        }));
+        if (guidedConversationId) {
+          setActiveConversationId(guidedConversationId);
+          void refreshConversations("guided", guidedConversationId);
+        }
+        if (shouldAutoOpenSourcePanel(currentQuery, guidedCitations)) {
+          void loadCitation(guidedCitations[0]);
+        } else {
+          setActiveCitation(null);
+          setActiveProofTarget(null);
+          setPagePayload(null);
+        }
       } else {
-        setActiveCitation(null);
-        setActiveProofTarget(null);
-        setPagePayload(null);
+        // General mode: SSE streaming via /api/query/stream
+        let finalResponse: QueryApiResponse | null = null;
+        await postJsonSse(
+          "/api/query/stream",
+          {
+            query: currentQuery,
+            language: requestLanguage,
+            role: "operator",
+            user_id: user?.id,
+            conversation_id: activeConversationId,
+            chat_scope: "general",
+            top_k: 5,
+          },
+          {
+            onEvent: (event, payload) => {
+              if (!payload || typeof payload !== "object") return;
+              if (event === "status" && "message" in payload) {
+                const message = String((payload as { message: unknown }).message);
+                updateChatMessage(assistantMessageId, (current) => ({
+                  ...current,
+                  streamStatus: message,
+                }));
+              }
+              if (event === "answer_delta" && "text" in payload) {
+                const text = String((payload as { text: unknown }).text);
+                updateChatMessage(assistantMessageId, (current) => ({
+                  ...current,
+                  content: `${current.content}${text}`,
+                  ttsText: `${current.ttsText || current.content}${text}`,
+                }));
+              }
+              if (event === "final") {
+                finalResponse = payload as QueryApiResponse;
+              }
+              if (event === "error" && "message" in payload) {
+                throw new Error(String((payload as { message: unknown }).message));
+              }
+            },
+          },
+        );
+
+        if (!finalResponse) {
+          throw new Error(copy.queryError);
+        }
+
+        const streamCitations = (finalResponse.evidence || []).map(mapCitationPayload);
+        const streamConversationId =
+          finalResponse.conversation_id || activeConversationId || null;
+        updateChatMessage(assistantMessageId, (current) => ({
+          ...current,
+          content: finalResponse?.answer || current.content,
+          citations: streamCitations.length > 0 ? streamCitations : undefined,
+          language: requestLanguage,
+          ttsText: finalResponse?.answer || current.content,
+          responseMode: "text",
+          isStreaming: false,
+          streamStatus: null,
+        }));
+        if (streamConversationId) {
+          setActiveConversationId(streamConversationId);
+          void refreshConversations("general", streamConversationId);
+        }
+
+        if (shouldAutoOpenSourcePanel(currentQuery, streamCitations)) {
+          void loadCitation(streamCitations[0]);
+        } else {
+          setActiveCitation(null);
+          setActiveProofTarget(null);
+          setPagePayload(null);
+        }
       }
     } catch (error) {
       console.error(error);
-      setChatMessages((prev) => [
-        ...prev,
-        {
-          id: createLocalMessageId("query-error"),
-          role: "assistant",
+      updateChatMessage(assistantMessageId, (current) => ({
+          ...current,
           content: copy.queryError,
-        },
-      ]);
+          isStreaming: false,
+          streamStatus: null,
+        }));
     } finally {
       setIsQuerying(false);
     }
@@ -1699,6 +1910,11 @@ export default function InformationLookup() {
   const allAssignments = dashboardData?.mandatory_training || [];
   const recentAssignments = allAssignments.slice(0, 4);
   const recentSops = (dashboardData?.recent_sops || []).slice(0, 4);
+  const todayItems = workerBrief?.today || [];
+  const memory = workerBrief?.memory;
+  const lastUsedLabel =
+    [memory?.last_equipment, memory?.last_sop_code].filter(Boolean).join(" | ") ||
+    "";
   const completionRate = Math.round(
     dashboardStats?.mandatory_completion_rate || 0,
   );
@@ -1762,6 +1978,26 @@ export default function InformationLookup() {
     conversations.find((item) => item.revision_id)?.revision_id ||
       recentSops.find((item) => item.revision_id)?.revision_id,
   );
+  const todayTitle =
+    language === "HIN"
+      ? "Aaj ke kaam"
+      : language === "HING"
+        ? "Aaj ke kaam"
+        : "Today for you";
+  const noTodayText =
+    language === "HIN"
+      ? "Aaj koi urgent kaam nahi. Latest SOP ya training dekh sakte hain."
+      : language === "HING"
+        ? "Aaj koi urgent kaam nahi. Latest SOP ya training dekh lo."
+        : "No urgent action. Review the latest SOP or continue training.";
+  const openItemLabel =
+    language === "HIN" ? "Open karein" : language === "HING" ? "Open karo" : "Open";
+  const priorityClass = (priority?: string) =>
+    priority === "high"
+      ? "border-[#dc241f]/25 bg-[#fff1f0] text-[#b3201d]"
+      : priority === "medium"
+        ? "border-[#ffd329]/40 bg-[#fff8d9] text-[#7a6100]"
+        : "border-[#00782a]/20 bg-[#ecf8f0] text-[#00782a]";
 
   const conversationStrip = (
     <div className="mb-4 rounded-[14px] border border-[#d2d8e0] bg-white p-3 shadow-[0px_6px_18px_rgba(0,25,168,0.05)]">
@@ -1781,10 +2017,12 @@ export default function InformationLookup() {
                     )
                 : conversationScopeTab === "reader"
                   ? readerThreadsHint(language)
+                  : conversationScopeTab === "guided"
+                    ? guidedEmptyHint(language)
                   : copy.noChats}
           </p>
           <div className="mt-2 inline-flex items-center rounded-[10px] border border-border bg-[#f5f8fc] p-1">
-            {(["general", "reader"] as ConversationScope[]).map((scope) => (
+            {(["general", "reader", "guided"] as ConversationScope[]).map((scope) => (
               <button
                 key={scope}
                 type="button"
@@ -1808,7 +2046,11 @@ export default function InformationLookup() {
             isQuerying || (conversationScopeTab === "reader" && !canOpenReaderFromTab)
           }
         >
-          {conversationScopeTab === "general" ? copy.newChat : openReaderLabel(language)}
+          {conversationScopeTab === "reader"
+            ? openReaderLabel(language)
+            : conversationScopeTab === "guided"
+              ? startGuidedLabel(language)
+              : copy.newChat}
         </Button>
       </div>
 
@@ -1831,7 +2073,7 @@ export default function InformationLookup() {
                   return;
                 }
                 setIsConversationViewOpen(true);
-                void loadConversation(conversation.id);
+                void loadConversation(conversation.id, conversationScopeTab);
               }}
               className={`min-w-[220px] rounded-[12px] border px-3 py-2 text-left transition-colors ${
                 activeConversationId === conversation.id
@@ -1862,6 +2104,8 @@ export default function InformationLookup() {
           <div className="rounded-[12px] border border-dashed border-border px-3 py-2 text-xs text-muted">
             {conversationScopeTab === "reader"
               ? readerEmptyHint(language)
+              : conversationScopeTab === "guided"
+                ? guidedEmptyHint(language)
               : copy.noChats}
           </div>
         )}
@@ -1910,6 +2154,72 @@ export default function InformationLookup() {
                   ))}
                 </div>
               </div>
+
+              <section className="mt-4 rounded-[12px] border border-border bg-white p-3.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
+                      {todayTitle}
+                    </p>
+                    {lastUsedLabel ? (
+                      <p className="mt-1 text-xs text-muted">
+                        Last used: {lastUsedLabel}
+                      </p>
+                    ) : null}
+                  </div>
+                  {memory?.interaction_count ? (
+                    <span className="rounded-full border border-[#00782a]/20 bg-[#ecf8f0] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#00782a]">
+                      {memory.interaction_count} assisted
+                    </span>
+                  ) : null}
+                </div>
+
+                <div className="mt-3 grid gap-2 md:grid-cols-3">
+                  {todayItems.length === 0 ? (
+                    <div className="rounded-[10px] border border-dashed border-border bg-[#f8fafd] p-3 text-sm text-muted md:col-span-3">
+                      {dashboardLoading ? "Loading..." : noTodayText}
+                    </div>
+                  ) : (
+                    todayItems.slice(0, 3).map((item, index) => (
+                      <button
+                        key={`${item.type}-${item.title}-${index}`}
+                        type="button"
+                        onClick={() => {
+                          if (item.type === "supervisor_handoff") {
+                            setConversationScopeTab("guided");
+                            setIsFreshChatOpen(true);
+                            setIsConversationViewOpen(true);
+                            return;
+                          }
+                          if (item.cta_url) {
+                            router.push(item.cta_url);
+                          }
+                        }}
+                        className="rounded-[10px] border border-border bg-[#f8fafd] p-3 text-left transition-colors hover:border-[#9fb0d0] hover:bg-white"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="line-clamp-2 text-sm font-semibold text-foreground">
+                            {item.title}
+                          </p>
+                          <span
+                            className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${priorityClass(item.priority)}`}
+                          >
+                            {item.priority || "info"}
+                          </span>
+                        </div>
+                        {item.detail ? (
+                          <p className="mt-1.5 line-clamp-2 text-xs text-muted">
+                            {item.detail}
+                          </p>
+                        ) : null}
+                        <p className="mt-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-primary">
+                          {openItemLabel}
+                        </p>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </section>
 
               <div className="mt-4 grid gap-3 lg:grid-cols-[1.08fr_0.92fr]">
                 <article className="rounded-[12px] border border-border bg-white p-3.5">
@@ -2187,8 +2497,8 @@ export default function InformationLookup() {
         </div>
 
         {showConversationView ? (
-          <div className="fixed inset-x-0 bottom-5 top-[205px] z-[80] flex items-start justify-center bg-[#07122f]/35 px-3 pt-3 backdrop-blur-sm md:px-6">
-            <div className="h-[min(75vh,calc(100vh-230px))] w-[min(1500px,94vw)] overflow-hidden rounded-[24px] border border-white/60 bg-[#edf3f8] shadow-[0_28px_80px_rgba(0,25,168,0.28)]">
+          <div className="fixed inset-x-0 bottom-4 top-[132px] z-[80] flex items-start justify-center bg-[#07122f]/38 px-3 pt-2 backdrop-blur-md md:px-6">
+            <div className="h-full w-[min(1580px,96vw)] overflow-hidden rounded-[24px] border border-white/60 bg-[#edf3f8] shadow-[0_28px_80px_rgba(0,25,168,0.28)]">
               <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden p-3 lg:flex-row">
             <div
               className={`${
@@ -2244,11 +2554,35 @@ export default function InformationLookup() {
                         <div>
                           <div className="mb-2 flex items-center justify-between gap-3">
                             <div className="flex items-center gap-2">
-                              <SiriRing animate={false} />
+                              <SiriRing animate={Boolean(msg.isStreaming)} />
                               <span className="text-xs font-medium text-muted">
-                                {copy.assistantTag}
+                                {msg.responseMode === "operation"
+                                  ? "Run Guide"
+                                  : copy.assistantTag}
                               </span>
+                              {msg.responseMode === "operation" &&
+                              operationStatusLabel(msg) ? (
+                                <span className="rounded-full bg-[#00782a]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#00782a]">
+                                  {operationStatusLabel(msg)}
+                                </span>
+                              ) : null}
+                              {shouldShowOperationStep(msg) ? (
+                                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-primary">
+                                  step {msg.operationStepIndex}
+                                </span>
+                              ) : null}
+                              {msg.requiresSupervisor ? (
+                                <span className="rounded-full bg-danger-light px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-danger">
+                                  supervisor
+                                </span>
+                              ) : null}
+                              {msg.completionRecordId ? (
+                                <span className="rounded-full bg-secondary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-secondary">
+                                  {msg.completionRecordId}
+                                </span>
+                              ) : null}
                             </div>
+                            {!msg.isStreaming ? (
                             <div className="flex items-center gap-1.5">
                               <button
                                 type="button"
@@ -2276,7 +2610,30 @@ export default function InformationLookup() {
                                 )}
                               </button>
                             </div>
+                            ) : null}
                           </div>
+                          {msg.isStreaming ? (
+                            <div className="mb-3 rounded-[12px] border border-[#c9d6f2] bg-[#f5f8ff] px-3 py-2 shadow-[0_8px_22px_rgba(0,25,168,0.06)]">
+                              <div className="flex items-center gap-2 text-[12px] font-semibold text-[#2947b2]">
+                                <SiriRing animate />
+                                <span>
+                                  {msg.streamStatus || "Generating your response"}
+                                </span>
+                              </div>
+                              {!msg.content ? (
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                  {["safety", "sources", "answer"].map((label) => (
+                                    <span
+                                      key={label}
+                                      className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted"
+                                    >
+                                      {label}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : null}
                           <div className="space-y-2">
                             {parseAnswerParagraphs(
                               msg.content,
@@ -2334,7 +2691,10 @@ export default function InformationLookup() {
                               ),
                             )}
                           </div>
-                          {msg.translatedHindi ? (
+                          {msg.isStreaming && msg.content ? (
+                            <span className="ml-0.5 inline-block h-4 w-1 animate-pulse bg-primary align-[-2px]" />
+                          ) : null}
+                          {!msg.isStreaming && msg.translatedHindi ? (
                             <div className="mt-3 rounded-[10px] border border-[#d7def0] bg-[#f7faff] px-3 py-2.5">
                               <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#2947b2]">
                                 Hindi translation
@@ -2344,7 +2704,21 @@ export default function InformationLookup() {
                               </p>
                             </div>
                           ) : null}
-                          {msg.citations && msg.citations.length > 0 ? (
+                          {!msg.isStreaming && msg.nextActions && msg.nextActions.length > 0 ? (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {msg.nextActions.map((action) => (
+                                <button
+                                  key={action}
+                                  type="button"
+                                  onClick={() => void handleSearch(action)}
+                                  className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary transition-colors hover:border-primary hover:bg-primary hover:text-white"
+                                >
+                                  {action}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                          {!msg.isStreaming && msg.citations && msg.citations.length > 0 ? (
                             <div className="mt-3 border-t border-border/60 pt-2.5">
                               <p className="mb-2 text-xs font-semibold uppercase tracking-[0.1em] text-muted">
                                 {copy.sources}
@@ -2374,7 +2748,7 @@ export default function InformationLookup() {
                   </div>
                 ))}
 
-                {isQuerying ? (
+                {isQuerying && !chatMessages.some((msg) => msg.isStreaming) ? (
                   <div className="flex justify-start">
                     <div className="rounded-[14px] border border-border bg-white px-3 py-2.5">
                       <div className="flex items-center gap-2">

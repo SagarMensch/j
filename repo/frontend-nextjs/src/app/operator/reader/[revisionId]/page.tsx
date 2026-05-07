@@ -12,7 +12,7 @@ import {
   StopSquareIcon,
   TranslateSparkIcon,
 } from "@/components/ui/icons";
-import { apiClient, API_BASE_URL } from "@/lib/api";
+import { apiClient, API_BASE_URL, postJsonSse } from "@/lib/api";
 import { AppLanguage, useAuth } from "@/lib/auth-context";
 import { trackEvent } from "@/lib/telemetry";
 import { PdfViewer } from "@/components/ui/pdf-viewer";
@@ -172,6 +172,8 @@ type ChatMessage = {
   audioBase64?: string;
   audioMimeType?: string;
   ttsLanguage?: string | null;
+  isStreaming?: boolean;
+  streamStatus?: string | null;
 };
 
 type VoiceState = "idle" | "recording" | "processing" | "playing";
@@ -992,6 +994,7 @@ export default function OperatorReaderPage() {
       mode: "reader",
     });
 
+    const assistantMessageId = createLocalMessageId("assistant");
     setMessages((prev) => [
       ...prev,
       {
@@ -1001,34 +1004,75 @@ export default function OperatorReaderPage() {
         citations: [],
         language: toQueryLanguage(language),
       },
+      {
+        id: assistantMessageId,
+        role: "assistant",
+        content: "",
+        citations: [],
+        language: toQueryLanguage(language),
+        ttsText: "",
+        isStreaming: true,
+        streamStatus: "Analyzing your document",
+      },
     ]);
     setQuestion("");
     setIsQuerying(true);
 
     try {
-      const response = (await apiClient.post("/api/query", {
-        query: currentQuestion,
-        language: toQueryLanguage(language),
-        role: "operator",
-        user_id: user?.id,
-        conversation_id: conversationId,
-        revision_id: revisionId,
-        chat_scope: "reader",
-        top_k: 6,
-      })) as QueryApiResponse;
+      let response: QueryApiResponse | null = null;
+      await postJsonSse(
+        "/api/query/stream",
+        {
+          query: currentQuestion,
+          language: toQueryLanguage(language),
+          role: "operator",
+          user_id: user?.id,
+          conversation_id: conversationId,
+          revision_id: revisionId,
+          chat_scope: "reader",
+          top_k: 5,
+        },
+        {
+          onEvent: (event, payload) => {
+            if (!payload || typeof payload !== "object") return;
+            if (event === "status" && "message" in payload) {
+              updateMessage(assistantMessageId, (current) => ({
+                ...current,
+                streamStatus: String((payload as { message: unknown }).message),
+              }));
+            }
+            if (event === "answer_delta" && "text" in payload) {
+              const text = String((payload as { text: unknown }).text);
+              updateMessage(assistantMessageId, (current) => ({
+                ...current,
+                content: `${current.content}${text}`,
+                ttsText: `${current.ttsText || current.content}${text}`,
+              }));
+            }
+            if (event === "final") {
+              response = payload as QueryApiResponse;
+            }
+            if (event === "error" && "message" in payload) {
+              throw new Error(String((payload as { message: unknown }).message));
+            }
+          },
+        },
+      );
+
+      if (!response) {
+        throw new Error(copy.queryError);
+      }
 
       const citations = (response.evidence || []).map(mapCitationPayload);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: createLocalMessageId("assistant"),
-          role: "assistant",
-          content: response.answer,
+      updateMessage(assistantMessageId, (current) => ({
+          ...current,
+          content: response?.answer || current.content,
           citations,
           language: toQueryLanguage(language),
-          ttsText: response.answer,
-        },
-      ]);
+          ttsText: response?.answer || current.content,
+          isStreaming: false,
+          streamStatus: null,
+        }));
 
       if (response.conversation_id) {
         setConversationId(response.conversation_id);
@@ -1043,16 +1087,14 @@ export default function OperatorReaderPage() {
         jumpToCitation(citations[0]);
       }
     } catch {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: createLocalMessageId("assistant-error"),
-          role: "assistant",
+      updateMessage(assistantMessageId, (current) => ({
+          ...current,
           content: copy.queryError,
           citations: [],
           language: toSpeechLanguage(language),
-        },
-      ]);
+          isStreaming: false,
+          streamStatus: null,
+        }));
     } finally {
       setIsQuerying(false);
     }
@@ -1234,7 +1276,7 @@ export default function OperatorReaderPage() {
                         : "border-border bg-white text-foreground"
                     }`}
                   >
-                    {message.role === "assistant" ? (
+                    {message.role === "assistant" && !message.isStreaming ? (
                       <div className="mb-2 flex items-center justify-end gap-1.5">
                         <button
                           type="button"
@@ -1273,10 +1315,35 @@ export default function OperatorReaderPage() {
                         </button>
                       </div>
                     ) : null}
+                    {message.isStreaming ? (
+                      <div className="mb-3 rounded-[12px] border border-[#c9d6f2] bg-[#f5f8ff] px-3 py-2 shadow-[0_8px_22px_rgba(0,25,168,0.06)]">
+                        <div className="flex items-center gap-2 text-[12px] font-semibold text-[#2947b2]">
+                          <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[#2947b2] border-t-transparent" />
+                          <span>
+                            {message.streamStatus || "Reviewing the document"}
+                          </span>
+                        </div>
+                        {!message.content ? (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {["source", "page", "lines"].map((label) => (
+                              <span
+                                key={label}
+                                className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted"
+                              >
+                                {label}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <p className="whitespace-pre-wrap text-sm leading-relaxed">
                       {message.content}
+                      {message.isStreaming && message.content ? (
+                        <span className="ml-0.5 inline-block h-4 w-1 animate-pulse bg-primary align-[-2px]" />
+                      ) : null}
                     </p>
-                    {message.translatedHindi ? (
+                    {!message.isStreaming && message.translatedHindi ? (
                       <div className="mt-3 rounded-[10px] border border-[#d7def0] bg-[#f7faff] px-3 py-2.5">
                         <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#2947b2]">
                           {copy.hindiTranslation}
@@ -1286,7 +1353,7 @@ export default function OperatorReaderPage() {
                         </p>
                       </div>
                     ) : null}
-                    {message.role === "assistant" && message.citations.length ? (
+                    {!message.isStreaming && message.role === "assistant" && message.citations.length ? (
                       <div className="mt-2 border-t border-border/60 pt-2">
                         <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
                           Sources
@@ -1308,7 +1375,7 @@ export default function OperatorReaderPage() {
                 </div>
               ))}
 
-              {isQuerying ? (
+              {isQuerying && !messages.some((message) => message.isStreaming) ? (
                 <div className="flex justify-start">
                   <div className="rounded-[10px] border border-border bg-white px-3 py-2 text-xs text-muted">
                     {isVoiceProcessing ? copy.processing : copy.generating}

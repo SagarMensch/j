@@ -83,6 +83,76 @@ MANDATORY_DDL_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS idx_guardrail_appeals_status_created ON guardrail_appeals(status, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_guardrail_appeals_user_created ON guardrail_appeals(user_id, created_at DESC)",
     """
+    CREATE TABLE IF NOT EXISTS worker_memory_profiles (
+        user_id uuid primary key references users(id) on delete cascade,
+        preferred_language text,
+        skill_tags jsonb not null default '[]'::jsonb,
+        risk_flags jsonb not null default '[]'::jsonb,
+        last_equipment text,
+        last_sop_code text,
+        interaction_count integer not null default 0,
+        last_interaction_at timestamptz,
+        updated_at timestamptz not null default now()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_worker_memory_profiles_updated ON worker_memory_profiles(updated_at DESC)",
+    """
+    CREATE TABLE IF NOT EXISTS worker_activity_events (
+        id uuid primary key default gen_random_uuid(),
+        user_id uuid not null references users(id) on delete cascade,
+        event_type text not null,
+        event_source text not null default 'system',
+        severity text not null default 'info',
+        title text not null,
+        details jsonb not null default '{}'::jsonb,
+        created_at timestamptz not null default now()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_worker_activity_user_created ON worker_activity_events(user_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_worker_activity_type_created ON worker_activity_events(event_type, created_at DESC)",
+    """
+    CREATE TABLE IF NOT EXISTS operation_run_records (
+        id uuid primary key default gen_random_uuid(),
+        user_id uuid not null references users(id) on delete cascade,
+        conversation_id uuid,
+        equipment text,
+        task text,
+        sop_code text,
+        sop_revision_id uuid,
+        current_phase text not null default 'task_selection',
+        current_step integer not null default 0,
+        prerequisites jsonb not null default '{}'::jsonb,
+        stop_conditions jsonb not null default '[]'::jsonb,
+        status text not null default 'active',
+        started_at timestamptz not null default now(),
+        completed_at timestamptz,
+        completion_record_id text,
+        metadata jsonb not null default '{}'::jsonb
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_operation_run_records_user_started ON operation_run_records(user_id, started_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_operation_run_records_conversation ON operation_run_records(conversation_id)",
+    """
+    CREATE TABLE IF NOT EXISTS supervisor_handoffs (
+        id uuid primary key default gen_random_uuid(),
+        user_id uuid not null references users(id) on delete cascade,
+        conversation_id uuid,
+        run_record_id uuid references operation_run_records(id) on delete set null,
+        equipment text,
+        task text,
+        reason text not null,
+        severity text not null default 'medium',
+        status text not null default 'open',
+        assigned_to_user_id uuid references users(id),
+        created_at timestamptz not null default now(),
+        resolved_at timestamptz,
+        resolution_notes text,
+        metadata jsonb not null default '{}'::jsonb
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_supervisor_handoffs_user_created ON supervisor_handoffs(user_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_supervisor_handoffs_status_created ON supervisor_handoffs(status, created_at DESC)",
+    """
     CREATE TABLE IF NOT EXISTS chat_conversations (
         id uuid primary key default gen_random_uuid(),
         user_id uuid not null references users(id) on delete cascade,
@@ -144,6 +214,37 @@ MANDATORY_DDL_STATEMENTS = (
     """,
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_reader_messages_conversation_order ON chat_reader_messages(conversation_id, message_order)",
     "CREATE INDEX IF NOT EXISTS idx_chat_reader_messages_conversation_created ON chat_reader_messages(conversation_id, created_at)",
+    """
+    CREATE TABLE IF NOT EXISTS chat_guided_conversations (
+        id uuid primary key default gen_random_uuid(),
+        user_id uuid not null references users(id) on delete cascade,
+        title text not null,
+        language text not null default 'en',
+        status text not null default 'active',
+        metadata jsonb not null default '{}'::jsonb,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now(),
+        last_message_at timestamptz not null default now()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_chat_guided_conversations_user_last_message ON chat_guided_conversations(user_id, last_message_at DESC)",
+    """
+    CREATE TABLE IF NOT EXISTS chat_guided_messages (
+        id uuid primary key default gen_random_uuid(),
+        conversation_id uuid not null references chat_guided_conversations(id) on delete cascade,
+        message_order integer not null,
+        role text not null,
+        content text not null,
+        language text,
+        citations jsonb not null default '[]'::jsonb,
+        query_text text,
+        retrieval_event_id uuid,
+        response_mode text not null default 'text',
+        created_at timestamptz not null default now()
+    )
+    """,
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_guided_messages_conversation_order ON chat_guided_messages(conversation_id, message_order)",
+    "CREATE INDEX IF NOT EXISTS idx_chat_guided_messages_conversation_created ON chat_guided_messages(conversation_id, created_at)",
 )
 
 
@@ -186,6 +287,46 @@ NON_BLOCKING_BACKFILL_STATEMENTS = (
     INNER JOIN chat_conversations c
         ON c.id = m.conversation_id
     WHERE COALESCE(c.metadata->>'scope', 'general') = 'reader'
+    ON CONFLICT (id) DO NOTHING
+    """,
+    """
+    INSERT INTO chat_guided_conversations (
+        id, user_id, title, language, status, metadata, created_at, updated_at, last_message_at
+    )
+    SELECT
+        c.id,
+        c.user_id,
+        c.title,
+        c.language,
+        c.status,
+        jsonb_set(COALESCE(c.metadata, '{}'::jsonb), '{scope}', '"guided"'::jsonb, true),
+        c.created_at,
+        c.updated_at,
+        c.last_message_at
+    FROM chat_conversations c
+    WHERE COALESCE(c.metadata->>'scope', 'general') = 'guided'
+    ON CONFLICT (id) DO NOTHING
+    """,
+    """
+    INSERT INTO chat_guided_messages (
+        id, conversation_id, message_order, role, content, language, citations, query_text, retrieval_event_id, response_mode, created_at
+    )
+    SELECT
+        m.id,
+        m.conversation_id,
+        m.message_order,
+        m.role,
+        m.content,
+        m.language,
+        m.citations,
+        m.query_text,
+        m.retrieval_event_id,
+        m.response_mode,
+        m.created_at
+    FROM chat_messages m
+    INNER JOIN chat_conversations c
+        ON c.id = m.conversation_id
+    WHERE COALESCE(c.metadata->>'scope', 'general') = 'guided'
     ON CONFLICT (id) DO NOTHING
     """,
 )
