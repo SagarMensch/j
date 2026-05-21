@@ -65,9 +65,14 @@ type DocumentSummary = {
 type PagePayload = {
   page: {
     page_number: number;
+    raw_text?: string | null;
     image_path?: string | null;
     image_url?: string | null;
   };
+  blocks?: Array<{
+    text?: string | null;
+  }>;
+  is_chunk_fallback?: boolean;
 };
 
 type QueryEvidencePayload = {
@@ -1212,6 +1217,14 @@ export default function OperatorReaderPage() {
               ) : activePdfUrl ? (
                 <div className="overflow-hidden rounded-[12px] border border-border bg-white">
                   <PdfViewer pdfUrl={activePdfUrl} currentPage={pageNumber} fallbackImageUrl={pageImageUrl} onLoadError={() => setPdfLoadFailed(true)} />
+                </div>
+              ) : pageImageUrl ? (
+                <div className="overflow-hidden rounded-[12px] border border-border bg-white">
+                  <img
+                    src={pageImageUrl}
+                    alt={`${documentMeta?.code || fallbackCode} page ${pageNumber}`}
+                    className="block h-auto w-full"
+                  />
                 </div>
               ) : pageText ? (
                 <div className="rounded-[12px] border border-border bg-white p-4">

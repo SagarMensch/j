@@ -5926,6 +5926,30 @@ async def document_page_view(revision_id: str, page_number: int):
     return {"page": page, "blocks": blocks}
 
 
+def _resolve_stored_file_path(stored_path: str | None, *, storage_root: str) -> Path | None:
+    if not stored_path:
+        return None
+
+    candidate = Path(stored_path)
+    if candidate.exists():
+        return candidate
+
+    parts_lower = [part.lower() for part in candidate.parts]
+    root_name = Path(storage_root).name.lower()
+    if root_name in parts_lower:
+        root_index = parts_lower.index(root_name)
+        relative_parts = candidate.parts[root_index + 1 :]
+        relocated = Path(storage_root).joinpath(*relative_parts)
+        if relocated.exists():
+            return relocated
+
+    filename_fallback = Path(storage_root) / candidate.name
+    if filename_fallback.exists():
+        return filename_fallback
+
+    return None
+
+
 @app.get("/api/chunks/{chunk_id}/content")
 async def chunk_content_view(chunk_id: str):
     with engine.connect() as conn:
@@ -5996,8 +6020,11 @@ async def document_page_image(revision_id: str, page_number: int):
     if not page or not page.get("image_path"):
         raise HTTPException(status_code=404, detail="Page image not found")
 
-    image_path = Path(page["image_path"])
-    if not image_path.exists():
+    image_path = _resolve_stored_file_path(
+        page["image_path"],
+        storage_root=settings.PROCESSED_DATA_DIR,
+    )
+    if not image_path:
         raise HTTPException(status_code=404, detail="Page image file missing")
 
     return FileResponse(image_path)
@@ -6030,8 +6057,11 @@ async def document_pdf(revision_id: str):
             detail=f"Original PDF file path not recorded for revision. Document may have been ingested without preserving the original file."
         )
 
-    pdf_path = Path(file_path)
-    if not pdf_path.exists():
+    pdf_path = _resolve_stored_file_path(
+        file_path,
+        storage_root=settings.RAW_DATA_DIR,
+    )
+    if not pdf_path:
         raise HTTPException(
             status_code=404,
             detail=f"Original PDF file not found on disk at: {file_path}"

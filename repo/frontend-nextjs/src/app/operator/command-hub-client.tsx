@@ -342,7 +342,7 @@ function conversationScopeLabel(
     return "Run Guide";
   }
   if (language === "HIN") {
-    return scope === "general" ? "à¤¸à¤¾à¤®à¤¾à¤¨à¥à¤¯" : "à¤°à¥€à¤¡à¤°";
+    return scope === "general" ? "सामान्य" : "रीडर";
   }
   return scope === "general" ? "General" : "Reader";
 }
@@ -354,7 +354,7 @@ function conversationThreadSummary(
 ) {
   const scopeText = conversationScopeLabel(language, scope);
   if (language === "HIN") {
-    return `${count} ${scopeText} à¤¥à¥à¤°à¥‡à¤¡`;
+    return `${count} ${scopeText} थ्रेड`;
   }
   if (language === "HING") {
     return `${count} ${scopeText} thread`;
@@ -364,7 +364,7 @@ function conversationThreadSummary(
 
 function readerThreadsHint(language: AppLanguage) {
   if (language === "HIN") {
-    return "à¤…à¤­à¥€ à¤•à¥‹à¤ˆ à¤°à¥€à¤¡à¤° à¤¥à¥à¤°à¥‡à¤¡ à¤¨à¤¹à¥€à¤‚ à¤¹à¥ˆà¥¤ à¤¸à¤¾à¤®à¤¾à¤¨à¥à¤¯ à¤šà¥ˆà¤Ÿ à¤‡à¤¤à¤¿à¤¹à¤¾à¤¸ à¤¸à¤¾à¤®à¤¾à¤¨à¥à¤¯ à¤Ÿà¥ˆà¤¬ à¤®à¥‡à¤‚ à¤¹à¥ˆà¥¤";
+    return "अभी कोई रीडर थ्रेड नहीं है। सामान्य चैट इतिहास सामान्य टैब में है।";
   }
   if (language === "HING") {
     return "Abhi koi reader thread nahi hai. General chat history General tab me hai.";
@@ -373,26 +373,26 @@ function readerThreadsHint(language: AppLanguage) {
 }
 
 function openReaderLabel(language: AppLanguage) {
-  if (language === "HIN") return "à¤°à¥€à¤¡à¤° à¤–à¥‹à¤²à¥‡à¤‚";
+  if (language === "HIN") return "रीडर खोलें";
   if (language === "HING") return "Reader kholo";
   return "Open Reader";
 }
 
 function readerContinueHint(language: AppLanguage) {
-  if (language === "HIN") return "à¤†à¤—à¥‡ à¤¬à¤¢à¤¼à¤¨à¥‡ à¤•à¥‡ à¤²à¤¿à¤ à¤°à¥€à¤¡à¤° à¤®à¥‡à¤‚ à¤–à¥‹à¤²à¥‡à¤‚à¥¤";
+  if (language === "HIN") return "आगे बढ़ने के लिए रीडर में खोलें।";
   if (language === "HING") return "Continue karne ke liye Reader me kholo.";
   return "Open in Reader workspace to continue.";
 }
 
 function generalContinueHint(language: AppLanguage) {
-  if (language === "HIN") return "à¤‡à¤¸ à¤¬à¤¾à¤¤à¤šà¥€à¤¤ à¤•à¥‹ à¤†à¤—à¥‡ à¤œà¤¾à¤°à¥€ à¤°à¤–à¥‡à¤‚à¥¤";
+  if (language === "HIN") return "इस बातचीत को आगे जारी रखें।";
   if (language === "HING") return "Is conversation ko aage continue karo.";
   return "Ready to continue this conversation.";
 }
 
 function readerEmptyHint(language: AppLanguage) {
   if (language === "HIN") {
-    return "à¤…à¤­à¥€ à¤•à¥‹à¤ˆ à¤°à¥€à¤¡à¤° à¤¥à¥à¤°à¥‡à¤¡ à¤¨à¤¹à¥€à¤‚ à¤¹à¥ˆà¥¤ à¤¦à¤¸à¥à¤¤à¤¾à¤µà¥‡à¤œ à¤¸à¥‡ à¤°à¥€à¤¡à¤° à¤–à¥‹à¤²à¤•à¤° à¤¨à¤¯à¤¾ à¤¥à¥à¤°à¥‡à¤¡ à¤¬à¤¨à¤¾à¤à¤‚à¥¤";
+    return "अभी कोई रीडर थ्रेड नहीं है। दस्तावेज़ से रीडर खोलकर नया थ्रेड बनाएं।";
   }
   if (language === "HING") {
     return "Abhi koi reader thread nahi hai. Document se Reader kholo aur naya thread banao.";
@@ -401,6 +401,9 @@ function readerEmptyHint(language: AppLanguage) {
 }
 
 function guidedEmptyHint(language: AppLanguage) {
+  if (language === "HIN") {
+    return "अभी कोई रन गाइड थ्रेड नहीं है। नया गाइड शुरू करें।";
+  }
   if (language === "HING") {
     return "Abhi koi Run Guide thread nahi hai. Naya guide start karo.";
   }
@@ -408,6 +411,7 @@ function guidedEmptyHint(language: AppLanguage) {
 }
 
 function startGuidedLabel(language: AppLanguage) {
+  if (language === "HIN") return "गाइड शुरू करें";
   if (language === "HING") return "Guide shuru karo";
   return "Start Guide";
 }
@@ -435,39 +439,39 @@ function shouldShowOperationStep(message: ChatMessage) {
 }
 
 function shiftCommandLabel(language: AppLanguage) {
-  if (language === "HIN") return "à¤¶à¤¿à¤«à¥à¤Ÿ à¤•à¤®à¤¾à¤¨à¥à¤¡";
+  if (language === "HIN") return "शिफ्ट कमांड";
   if (language === "HING") return "Shift command";
   return "Shift Command";
 }
 
 function latestRevisionLabel(language: AppLanguage) {
-  if (language === "HIN") return "à¤¨à¤¯à¤¾ à¤°à¤¿à¤µà¤¿à¤œà¤¨";
+  if (language === "HIN") return "नया रिविजन";
   if (language === "HING") return "Latest revision";
   return "Latest Revision";
 }
 
 function noDocumentLabel(language: AppLanguage) {
-  if (language === "HIN") return "à¤•à¥‹à¤ˆ à¤¦à¤¸à¥à¤¤à¤¾à¤µà¥‡à¤œ à¤¨à¤¹à¥€à¤‚";
+  if (language === "HIN") return "कोई दस्तावेज़ नहीं";
   if (language === "HING") return "Koi document nahi";
   return "No document";
 }
 
 function noApprovedRevisionLabel(language: AppLanguage) {
-  if (language === "HIN") return "à¤…à¤­à¥€ à¤•à¥‹à¤ˆ à¤…à¤¨à¥à¤®à¥‹à¤¦à¤¿à¤¤ à¤°à¤¿à¤µà¤¿à¤œà¤¨ à¤¨à¤¹à¥€à¤‚ à¤®à¤¿à¤²à¤¾à¥¤";
+  if (language === "HIN") return "अभी कोई अनुमोदित रिविजन नहीं मिला।";
   if (language === "HING") return "Abhi koi approved revision nahi mila.";
   return "No approved revision found yet.";
 }
 
 function generatingResponseLabel(language: AppLanguage) {
-  if (language === "HIN") return "à¤œà¤µà¤¾à¤¬ à¤¬à¤¨ à¤°à¤¹à¤¾ à¤¹à¥ˆ...";
+  if (language === "HIN") return "जवाब बन रहा है...";
   if (language === "HING") return "Answer ban raha hai...";
   return "Generating response...";
 }
 
 function backToHubLabel(language: AppLanguage) {
-  if (language === "HIN") return "â† à¤•à¤®à¤¾à¤¨à¥à¤¡ à¤¹à¤¬ à¤ªà¤° à¤µà¤¾à¤ªà¤¸";
-  if (language === "HING") return "â† Command Hub par wapas";
-  return "â† Back to Command Hub";
+  if (language === "HIN") return "कमांड हब पर वापस";
+  if (language === "HING") return "Command Hub par wapas";
+  return "Back to Command Hub";
 }
 
 function shouldAutoOpenSourcePanel(query: string, citations: CitationType[]) {
@@ -824,37 +828,37 @@ const COPY: Record<AppLanguage, LookupCopy> = {
     features: ["Voice query", "Hindi/Hinglish", "Exact source text"],
   },
   HIN: {
-    title: "SOP à¤ªà¥‚à¤›à¥‡à¤‚, à¤¸à¤¹à¥€ à¤‰à¤¤à¥à¤¤à¤° à¤ªà¤¾à¤à¤‚",
+    title: "SOP पूछें, सही उत्तर पाएं",
     subtitle:
-      "à¤ªà¥à¤°à¤¶à¥à¤¨ à¤Ÿà¤¾à¤‡à¤ª à¤•à¤°à¥‡à¤‚ à¤¯à¤¾ à¤¬à¥‹à¤²à¥‡à¤‚à¥¤ à¤‰à¤¤à¥à¤¤à¤° à¤•à¥‡à¤µà¤² à¤…à¤¨à¥à¤®à¥‹à¤¦à¤¿à¤¤ à¤¦à¤¸à¥à¤¤à¤¾à¤µà¥‡à¤œà¥‹à¤‚ à¤¸à¥‡ à¤®à¤¿à¤²à¥‡à¤—à¤¾à¥¤",
-    placeholder: "à¤ªà¥à¤°à¤•à¥à¤°à¤¿à¤¯à¤¾, à¤¸à¥à¤°à¤•à¥à¤·à¤¾ à¤¸à¥à¤Ÿà¥‡à¤ª, à¤®à¤¶à¥€à¤¨ à¤‘à¤ªà¤°à¥‡à¤¶à¤¨ à¤ªà¥‚à¤›à¥‡à¤‚...",
-    followUpPlaceholder: "à¤…à¤—à¤²à¤¾ à¤ªà¥à¤°à¤¶à¥à¤¨ à¤ªà¥‚à¤›à¥‡à¤‚...",
-    askButton: "à¤ªà¥‚à¤›à¥‡à¤‚",
-    voiceStartAction: "Voice shuru karein",
-    voiceStopRecordingAction: "Rok kar bhejein",
-    voiceCancelProcessingAction: "Radd karein",
-    voiceStopPlaybackAction: "Audio rokein",
-    voiceReady: "Ek baar tap karke bolna shuru karein. Dobara tap karke bhejein.",
-    listening: "à¤¸à¥à¤¨ à¤°à¤¹à¤¾ à¤¹à¥ˆà¥¤ à¤…à¤­à¥€ à¤¬à¥‹à¤²à¥‡à¤‚à¥¤",
-    voiceProcessing: "Voice query process ho rahi hai. Radd karne ke liye tap karein.",
-    voicePlaying: "Voice jawab baj raha hai. Audio rokne ke liye tap karein.",
-    conversation: "à¤¬à¤¾à¤¤à¤šà¥€à¤¤",
-    sources: "à¤¸à¥à¤°à¥‹à¤¤",
-    sourceDoc: "à¤¸à¥à¤°à¥‹à¤¤ à¤¦à¤¸à¥à¤¤à¤¾à¤µà¥‡à¤œ",
-    noDocTitle: "à¤•à¥‹à¤ˆ à¤¸à¥à¤°à¥‹à¤¤ à¤šà¤¯à¤¨à¤¿à¤¤ à¤¨à¤¹à¥€à¤‚",
-    noDocHint: "à¤¸à¤¹à¥€ à¤Ÿà¥‡à¤•à¥à¤¸à¥à¤Ÿ à¤¦à¥‡à¤–à¤¨à¥‡ à¤•à¥‡ à¤²à¤¿à¤ à¤¸à¥à¤°à¥‹à¤¤ à¤šà¤¿à¤ª à¤ªà¤° à¤•à¥à¤²à¤¿à¤• à¤•à¤°à¥‡à¤‚à¥¤",
-    loadDoc: "à¤¦à¤¸à¥à¤¤à¤¾à¤µà¥‡à¤œ à¤²à¥‹à¤¡ à¤¹à¥‹ à¤°à¤¹à¤¾ à¤¹à¥ˆ...",
-    assistantTag: "à¤¸à¤¹à¤¾à¤¯à¤•",
-    chunkTag: "à¤®à¤¿à¤²à¤¾ à¤¹à¥à¤† à¤­à¤¾à¤—",
-    sourceProofLabel: "à¤¸à¥à¤°à¥‹à¤¤ à¤ªà¥à¤°à¤®à¤¾à¤£",
-    voiceError: "à¤µà¥‰à¤‡à¤¸ à¤•à¥à¤µà¥‡à¤°à¥€ à¤¨à¤¹à¥€à¤‚ à¤šà¤²à¥€à¥¤ à¤«à¤¿à¤° à¤¸à¥‡ à¤•à¥‹à¤¶à¤¿à¤¶ à¤•à¤°à¥‡à¤‚à¥¤",
-    queryError: "à¤…à¤­à¥€ à¤¬à¥ˆà¤•à¤à¤‚à¤¡ à¤¸à¥‡ à¤•à¤¨à¥‡à¤•à¥à¤Ÿ à¤¨à¤¹à¥€à¤‚ à¤¹à¥‹ à¤ªà¤¾à¤¯à¤¾à¥¤",
-    voiceUnsupported: "à¤‡à¤¸ à¤¬à¥à¤°à¤¾à¤‰à¤œà¤° à¤®à¥‡à¤‚ à¤µà¥‰à¤‡à¤¸ à¤‡à¤¨à¤ªà¥à¤Ÿ à¤‰à¤ªà¤²à¤¬à¥à¤§ à¤¨à¤¹à¥€à¤‚ à¤¹à¥ˆà¥¤",
-    newChat: "à¤¨à¤ˆ à¤šà¥ˆà¤Ÿ",
-    recentChats: "à¤ªà¥à¤°à¤¾à¤¨à¥€ à¤šà¥ˆà¤Ÿ",
-    noChats: "à¤…à¤­à¥€ à¤•à¥‹à¤ˆ à¤¸à¥‡à¤µ à¤šà¥ˆà¤Ÿ à¤¨à¤¹à¥€à¤‚ à¤¹à¥ˆà¥¤",
-    loadingChats: "à¤¸à¥‡à¤µ à¤šà¥ˆà¤Ÿ à¤²à¥‹à¤¡ à¤¹à¥‹ à¤°à¤¹à¥€ à¤¹à¥ˆ...",
-    features: ["à¤µà¥‰à¤‡à¤¸ à¤•à¥à¤µà¥‡à¤°à¥€", "à¤¹à¤¿à¤‚à¤¦à¥€/à¤¹à¤¿à¤‚à¤—à¥à¤²à¤¿à¤¶", "à¤¸à¥à¤°à¥‹à¤¤ à¤ªà¥à¤°à¤®à¤¾à¤£"],
+      "प्रश्न टाइप करें या बोलें। उत्तर केवल अनुमोदित दस्तावेज़ों से मिलेगा।",
+    placeholder: "प्रक्रिया, सुरक्षा स्टेप, मशीन ऑपरेशन पूछें...",
+    followUpPlaceholder: "अगला प्रश्न पूछें...",
+    askButton: "पूछें",
+    voiceStartAction: "वॉइस शुरू करें",
+    voiceStopRecordingAction: "रोककर भेजें",
+    voiceCancelProcessingAction: "रद्द करें",
+    voiceStopPlaybackAction: "ऑडियो रोकें",
+    voiceReady: "एक बार टैप करके बोलना शुरू करें। दोबारा टैप करके भेजें।",
+    listening: "सुन रहा है। अभी बोलें।",
+    voiceProcessing: "वॉइस क्वेरी प्रोसेस हो रही है। रद्द करने के लिए टैप करें।",
+    voicePlaying: "वॉइस जवाब चल रहा है। ऑडियो रोकने के लिए टैप करें।",
+    conversation: "बातचीत",
+    sources: "स्रोत",
+    sourceDoc: "स्रोत दस्तावेज़",
+    noDocTitle: "कोई स्रोत चयनित नहीं",
+    noDocHint: "सही टेक्स्ट देखने के लिए स्रोत चिप पर क्लिक करें।",
+    loadDoc: "दस्तावेज़ लोड हो रहा है...",
+    assistantTag: "सहायक",
+    chunkTag: "मिला हुआ भाग",
+    sourceProofLabel: "स्रोत प्रमाण",
+    voiceError: "वॉइस क्वेरी नहीं चली। फिर से कोशिश करें।",
+    queryError: "अभी बैकएंड से कनेक्ट नहीं हो पाया।",
+    voiceUnsupported: "इस ब्राउज़र में वॉइस इनपुट उपलब्ध नहीं है।",
+    newChat: "नई चैट",
+    recentChats: "पुरानी चैट",
+    noChats: "अभी कोई सेव चैट नहीं है।",
+    loadingChats: "सेव चैट लोड हो रही है...",
+    features: ["वॉइस क्वेरी", "हिंदी/हिंग्लिश", "स्रोत प्रमाण"],
   },
   HING: {
     title: "SOP pucho, exact answer lo",
@@ -1965,9 +1969,9 @@ export default function InformationLookup() {
         ]
       : language === "HIN"
         ? [
-            "Meri shift ka startup checklist dikhao.",
-            "Machine safety SOP ko 5 points mein samjhao.",
-            "Latest SOP revision mein kya badla hai?",
+            "मेरी शिफ्ट का स्टार्टअप चेकलिस्ट दिखाएं।",
+            "मशीन सुरक्षा SOP को 5 बिंदुओं में समझाएं।",
+            "नवीनतम SOP रिविजन में क्या बदला है?",
           ]
         : [
             "Meri shift ka startup checklist dikhao.",
@@ -1980,18 +1984,18 @@ export default function InformationLookup() {
   );
   const todayTitle =
     language === "HIN"
-      ? "Aaj ke kaam"
+      ? "आज के काम"
       : language === "HING"
         ? "Aaj ke kaam"
         : "Today for you";
   const noTodayText =
     language === "HIN"
-      ? "Aaj koi urgent kaam nahi. Latest SOP ya training dekh sakte hain."
+      ? "आज कोई जरूरी काम नहीं है। नवीनतम SOP या ट्रेनिंग देख सकते हैं।"
       : language === "HING"
         ? "Aaj koi urgent kaam nahi. Latest SOP ya training dekh lo."
         : "No urgent action. Review the latest SOP or continue training.";
   const openItemLabel =
-    language === "HIN" ? "Open karein" : language === "HING" ? "Open karo" : "Open";
+    language === "HIN" ? "खोलें" : language === "HING" ? "Open karo" : "Open";
   const priorityClass = (priority?: string) =>
     priority === "high"
       ? "border-[#dc241f]/25 bg-[#fff1f0] text-[#b3201d]"
@@ -2512,6 +2516,7 @@ export default function InformationLookup() {
                     onClick={() => setIsConversationViewOpen(false)}
                     className="rounded-full border border-border bg-white px-3 py-1.5 text-xs font-semibold text-muted transition-colors hover:border-primary hover:text-primary"
                   >
+                    <span aria-hidden="true">&larr;</span>{" "}
                     {backToHubLabel(language)}
                   </button>
                   <h2 className="text-sm font-semibold text-foreground">
