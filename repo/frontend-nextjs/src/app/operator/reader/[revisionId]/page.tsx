@@ -1,21 +1,38 @@
 "use client";
 
-import React, { FormEvent, useEffect, useRef, useState } from "react";
+import React, { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { OperatorLayout } from "@/components/operator/operator-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  QuestionIcon,
   DocumentStackIcon,
-  MicPulseIcon,
-  SpeakerWaveIcon,
-  StopSquareIcon,
-  TranslateSparkIcon,
+  FileSearchIcon,
+  ChevronDownSm,
+  ChevronUpSm,
+  ChevronRightSm,
+  CloseSm,
+  CopyIcon,
+  CheckIcon,
+  LightbulbIcon,
+  Sparkles,
+  SpeakerIcon,
+  StarsIcon,
+  BrandIcon,
+  ExpandIcon,
 } from "@/components/ui/icons";
 import { apiClient, API_BASE_URL, postJsonSse } from "@/lib/api";
 import { AppLanguage, useAuth } from "@/lib/auth-context";
 import { trackEvent } from "@/lib/telemetry";
 import { PdfViewer } from "@/components/ui/pdf-viewer";
+import { AnswerDisplay } from "@/components/reader/answer-display";
+import {
+  VoiceMicButton,
+  VoiceMicSubmitPayload,
+} from "@/components/ui/voice-mic-button";
+import { blobToWav } from "@/lib/audioToWav";
 
 type ReaderCopy = {
   title: string;
@@ -68,6 +85,7 @@ type PagePayload = {
     raw_text?: string | null;
     image_path?: string | null;
     image_url?: string | null;
+    raw_text?: string | null;
   };
   blocks?: Array<{
     text?: string | null;
@@ -321,6 +339,25 @@ function parsePositiveInt(value: string | null | undefined, fallback = 1) {
   return parsed;
 }
 
+function cleanMessageText(text: string): string {
+  if (!text) return "";
+  let cleaned = text;
+  cleaned = cleaned.replace(/```[\s\S]*?```/g, "");
+  cleaned = cleaned.replace(/`([^`]+)`/g, "$1");
+  cleaned = cleaned.replace(/\|[-]+\|[-]+\|/g, "");
+  cleaned = cleaned.replace(/\|([^|]+)\|([^|]+)\|/g, "$1: $2");
+  cleaned = cleaned.replace(/^\|.*\|$/gm, "");
+  cleaned = cleaned.replace(/^[-]{3,}$/gm, "");
+  cleaned = cleaned.replace(/^={3,}$/gm, "");
+  cleaned = cleaned.replace(/^[_]{3,}$/gm, "");
+  cleaned = cleaned.replace(/^#+\s*/gm, "");
+  cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, "$1");
+  cleaned = cleaned.replace(/\*([^*]+)\*/g, "$1");
+  cleaned = cleaned.replace(/\n{3,}/g, "\n\n");
+  cleaned = cleaned.split("\n").map((l) => l.trim()).join("\n");
+  return cleaned.trim();
+}
+
 function formatCitationLabel(citation: CitationType) {
   const lineStart = citation.lineStart;
   const lineEnd = citation.lineEnd;
@@ -365,6 +402,11 @@ export default function OperatorReaderPage() {
   const [activeAudioMessageId, setActiveAudioMessageId] = useState<
     string | null
   >(null);
+  const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
+  const [documentSummary, setDocumentSummary] = useState<string>("");
+  const [, setIsGeneratingSummary] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isFullscreenChatOpen, setIsFullscreenChatOpen] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -450,6 +492,10 @@ export default function OperatorReaderPage() {
     goToPage(targetPage);
   }
 
+  function toggleFullscreen() {
+    setIsFullscreen(prev => !prev);
+  }
+
   const getRecordingMimeType = () => {
     if (
       typeof MediaRecorder === "undefined" ||
@@ -520,7 +566,7 @@ export default function OperatorReaderPage() {
     }
   };
 
-  const updateMessage = (
+  const updateMessage = useCallback((
     messageId: string,
     updater: (message: ChatMessage) => ChatMessage,
   ) => {
@@ -529,7 +575,9 @@ export default function OperatorReaderPage() {
         message.id === messageId ? updater(message) : message,
       ),
     );
-  };
+  }, []);
+
+  const handlePdfLoadError = useCallback(() => setPdfLoadFailed(true), []);
 
   const requestHindiTranslation = async (messageId: string) => {
     const message = messages.find((item) => item.id === messageId);
@@ -641,11 +689,15 @@ export default function OperatorReaderPage() {
     setMessages([]);
     setActiveCitation(null);
     setPdfLoadFailed(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revisionId]);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    const timer = setTimeout(() => {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [messages.length]);
 
   useEffect(() => {
     return () => {
@@ -765,10 +817,100 @@ export default function OperatorReaderPage() {
     };
 
     void loadConversationHistory();
-    return () => {
-      cancelled = true;
-    };
+  return () => {
+    cancelled = true;
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId, revisionId, user?.id]);
+
+  useEffect(() => {
+    if (messages.length > 0) return;
+    if (!pagePayload) return;
+
+    let cancelled = false;
+    const rawText = pagePayload?.page?.raw_text || pagePayload?.blocks?.map((b: { text?: string }) => b.text).filter(Boolean).join("\n") || "";
+    if (!rawText) return;
+
+    const cleanLines = rawText.split("\n")
+      .map((l: string) => l.trim())
+      .filter((l: string) =>
+        l.length > 15 &&
+        !l.startsWith("```") &&
+        !l.startsWith("|--") &&
+        !l.startsWith("---") &&
+        !/^(effective date|issue|revision|page \d|approved by|prepared by|reviewed by)/i.test(l)
+      );
+    const meaningfulText = cleanLines.join(" ").replace(/\s+/g, " ").substring(0, 2000);
+
+    setDocumentSummary("");
+    setIsGeneratingSummary(true);
+    setSuggestedQuestions([]);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+    fetch(`${API_BASE_URL}/api/query/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        query: `Based on this document content, provide a 2-3 sentence summary of what this document covers and its main purpose. Then list 3-4 suggested questions a plant operator might ask.\n\nDocument content:\n${meaningfulText}`,
+        language: "en",
+        role: "operator",
+        revision_id: revisionId,
+        chat_scope: "reader",
+        top_k: 5,
+      }),
+    }).then(async (response) => {
+      clearTimeout(timeoutId);
+      if (cancelled) return;
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let answer = "";
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value);
+          for (const line of chunk.split("\n")) {
+            if (!line.startsWith("data: ")) continue;
+            try {
+              const evt = JSON.parse(line.slice(6));
+              if (evt.type === "final" && evt.data?.answer) {
+                answer = evt.data.answer;
+              } else if (evt.type === "answer_delta" && evt.data?.text) {
+                answer += evt.data.text;
+              }
+            } catch {}
+          }
+        }
+      }
+
+      if (!cancelled && answer) {
+        const parts = answer.split(/\n/).filter((l: string) => l.trim());
+        const questionStart = parts.findIndex((l: string) => /suggest|question|ask/i.test(l));
+        if (questionStart > 0) {
+          setDocumentSummary(parts.slice(0, questionStart).join(" ").trim());
+          const qs = parts.slice(questionStart).map((l: string) => l.replace(/^[-•*\d.]+\s*/, "").trim()).filter((q: string) => q.length > 10);
+          setSuggestedQuestions(qs.slice(0, 4));
+        } else {
+          setDocumentSummary(answer.trim());
+          setSuggestedQuestions(["Summarize this document", "What are the safety procedures?", "What PPE is required?", "What are the main steps?"]);
+        }
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        const fallbackSummary = cleanLines.slice(0, 3).join(". ").trim() + ".";
+        setDocumentSummary(fallbackSummary || "Document loaded. Ask any question.");
+        setSuggestedQuestions(["Summarize this document", "What are the safety procedures?", "What PPE is required?", "What are the main steps?"]);
+      }
+    }).finally(() => {
+      if (!cancelled) setIsGeneratingSummary(false);
+    });
+
+    return () => { cancelled = true; clearTimeout(timeoutId); };
+  }, [pagePayload, messages.length, revisionId]);
 
   const submitVoiceQuery = async (
     audioBlob: Blob,
@@ -867,9 +1009,18 @@ export default function OperatorReaderPage() {
         return;
       }
 
-      const audioBlob = new Blob(chunks, {
+      const rawBlob = new Blob(chunks, {
         type: recorder.mimeType || mimeType || "audio/webm",
       });
+
+      // Convert to WAV so Sarvam STT accepts the audio format
+      let audioBlob: Blob;
+      try {
+        audioBlob = await blobToWav(rawBlob);
+      } catch {
+        console.warn("Reader voice: WAV conversion failed, using raw blob");
+        audioBlob = rawBlob;
+      }
 
       if (!audioBlob.size) {
         console.warn("Reader voice: audio blob is empty");
@@ -987,9 +1138,12 @@ export default function OperatorReaderPage() {
     }
   };
 
-  const submitQuestion = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const currentQuestion = question.trim();
+  const submitQuestion = async (
+    event?: FormEvent<HTMLFormElement>,
+    overrideText?: string,
+  ) => {
+    event?.preventDefault();
+    const currentQuestion = (overrideText ?? question).trim();
     if (!currentQuestion || isQuerying) return;
 
     trackEvent("ui.query_submitted", {
@@ -1035,6 +1189,7 @@ export default function OperatorReaderPage() {
           conversation_id: conversationId,
           revision_id: revisionId,
           chat_scope: "reader",
+          current_page: pageNumber,
           top_k: 5,
         },
         {
@@ -1197,9 +1352,19 @@ export default function OperatorReaderPage() {
                 <DocumentStackIcon className="h-4 w-4" />
                 <h2 className="text-sm font-semibold">{copy.docPanelTitle}</h2>
               </div>
-              <Badge variant="default" size="sm">
-                p.{pageNumber}
-              </Badge>
+              <div className="flex items-center gap-2">
+                <Badge variant="default" size="sm">
+                  p.{pageNumber}
+                </Badge>
+                <button
+                  type="button"
+                  onClick={toggleFullscreen}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-[6px] border border-border bg-white text-muted transition-colors hover:border-primary hover:text-primary"
+                  title="Fullscreen reader"
+                >
+                  <ExpandIcon className="h-3.5 w-3.5" />
+                </button>
+              </div>
             </div>
 
             <div className="min-h-0 flex-1 overflow-auto bg-[rgba(243,247,251,0.72)] p-4">
@@ -1216,7 +1381,7 @@ export default function OperatorReaderPage() {
                 </div>
               ) : activePdfUrl ? (
                 <div className="overflow-hidden rounded-[12px] border border-border bg-white">
-                  <PdfViewer pdfUrl={activePdfUrl} currentPage={pageNumber} fallbackImageUrl={pageImageUrl} onLoadError={() => setPdfLoadFailed(true)} />
+                  <PdfViewer pdfUrl={activePdfUrl} currentPage={pageNumber} fallbackImageUrl={pageImageUrl} onLoadError={handlePdfLoadError} />
                 </div>
               ) : pageImageUrl ? (
                 <div className="overflow-hidden rounded-[12px] border border-border bg-white">
@@ -1282,154 +1447,93 @@ export default function OperatorReaderPage() {
                   key={message.id}
                   className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
                 >
-                  <div
-                    className={`max-w-[90%] rounded-[12px] border px-3 py-2 ${
-                      message.role === "user"
-                        ? "border-primary bg-primary text-white"
-                        : "border-border bg-white text-foreground"
-                    }`}
-                  >
-                    {message.role === "assistant" && !message.isStreaming ? (
-                      <div className="mb-2 flex items-center justify-end gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => void requestHindiTranslation(message.id)}
-                          className="inline-flex items-center gap-1 rounded-full border border-[#d8dfec] bg-[#f6f8ff] px-2.5 py-1 text-[11px] font-semibold text-[#2947b2] transition-colors hover:border-[#a9b8e4] hover:bg-white"
-                          title={
-                            message.translatedHindi
-                              ? copy.hideHindi
-                              : copy.translateHindi
-                          }
-                        >
-                          <TranslateSparkIcon className="h-3.5 w-3.5" />
-                          <span>Hindi</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void requestSpeechForMessage(message.id)}
-                          className={`inline-flex h-8 w-8 items-center justify-center rounded-full border transition-colors ${
-                            activeAudioMessageId === message.id &&
-                            isVoicePlaying
-                              ? "border-secondary bg-secondary text-white"
-                              : "border-[#d8dfec] bg-[#f6f8ff] text-[#2947b2] hover:border-[#a9b8e4] hover:bg-white"
-                          }`}
-                          title={
-                            activeAudioMessageId === message.id && isVoicePlaying
-                              ? copy.stopAudio
-                              : copy.speakAnswer
-                          }
-                        >
-                          {activeAudioMessageId === message.id &&
-                          isVoicePlaying ? (
-                            <StopSquareIcon className="h-3.5 w-3.5" />
-                          ) : (
-                            <SpeakerWaveIcon className="h-3.5 w-3.5" />
-                          )}
-                        </button>
-                      </div>
-                    ) : null}
-                    {message.isStreaming ? (
-                      <div className="mb-3 rounded-[12px] border border-[#c9d6f2] bg-[#f5f8ff] px-3 py-2 shadow-[0_8px_22px_rgba(0,25,168,0.06)]">
-                        <div className="flex items-center gap-2 text-[12px] font-semibold text-[#2947b2]">
-                          <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[#2947b2] border-t-transparent" />
-                          <span>
-                            {message.streamStatus || "Reviewing the document"}
-                          </span>
-                        </div>
-                        {!message.content ? (
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            {["source", "page", "lines"].map((label) => (
-                              <span
-                                key={label}
-                                className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted"
-                              >
-                                {label}
-                              </span>
-                            ))}
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : null}
-                    <p className="whitespace-pre-wrap text-sm leading-relaxed">
-                      {message.content}
-                      {message.isStreaming && message.content ? (
-                        <span className="ml-0.5 inline-block h-4 w-1 animate-pulse bg-primary align-[-2px]" />
-                      ) : null}
-                    </p>
-                    {!message.isStreaming && message.translatedHindi ? (
-                      <div className="mt-3 rounded-[10px] border border-[#d7def0] bg-[#f7faff] px-3 py-2.5">
-                        <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#2947b2]">
-                          {copy.hindiTranslation}
-                        </p>
-                        <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                          {message.translatedHindi}
-                        </p>
-                      </div>
-                    ) : null}
-                    {!message.isStreaming && message.role === "assistant" && message.citations.length ? (
-                      <div className="mt-2 border-t border-border/60 pt-2">
-                        <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
-                          Sources
-                        </p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {message.citations.map((citation) => (
-                            <button
-                              key={`${message.id}-${citation.chunkId}`}
-                              onClick={() => jumpToCitation(citation)}
-                              className="rounded-[6px] border border-border bg-white px-2 py-1 text-[11px] font-medium text-foreground transition-colors hover:border-primary hover:text-primary"
-                            >
-                              {formatCitationLabel(citation)}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
+                  {message.role === "assistant" ? (
+                    <div className="max-w-[90%] rounded-[14px] border border-[rgba(0,0,0,0.06)] bg-white px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+                      <AnswerDisplay
+                        content={message.content}
+                        citations={message.citations}
+                        isStreaming={message.isStreaming}
+                        streamStatus={message.streamStatus}
+                        onCitationClick={jumpToCitation}
+                        onSpeak={() => void requestSpeechForMessage(message.id)}
+                        onHindi={() => void requestHindiTranslation(message.id)}
+                        isPlaying={activeAudioMessageId === message.id && isVoicePlaying}
+                        isHindi={Boolean(message.translatedHindi)}
+                      />
+                    </div>
+                  ) : (
+                    <div className="max-w-[85%] rounded-[14px] bg-[#0019a8] px-4 py-3 text-white shadow-[0_1px_3px_rgba(0,25,168,0.2)]">
+                      <p className="text-[13px] leading-relaxed" style={{ fontFamily: "'Figtree', sans-serif" }}>
+                        {cleanMessageText(message.content)}
+                      </p>
+                    </div>
+                  )}
                 </div>
               ))}
 
               {isQuerying && !messages.some((message) => message.isStreaming) ? (
                 <div className="flex justify-start">
-                  <div className="rounded-[10px] border border-border bg-white px-3 py-2 text-xs text-muted">
-                    {isVoiceProcessing ? copy.processing : copy.generating}
+                  <div className="inline-flex items-center gap-2 rounded-[14px] border border-[rgba(0,0,0,0.06)] bg-white px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+                    <div className="ad-thinking-dots">
+                      <span /><span /><span />
+                    </div>
+                    <span className="text-xs font-medium text-muted" style={{ fontFamily: "'Figtree', sans-serif" }}>
+                      {isVoiceProcessing ? copy.processing : copy.generating}
+                    </span>
                   </div>
                 </div>
               ) : null}
               <div ref={chatEndRef} />
             </div>
 
+            {documentSummary && messages.length === 0 && (
+              <div className="border-t border-border bg-[rgba(248,251,255,0.85)] p-3">
+                <div className="mb-2 rounded-[10px] border border-border bg-white p-3">
+                  <p className="mb-1 text-xs font-semibold text-foreground">Document Summary</p>
+                  <p className="text-xs text-muted leading-relaxed">{documentSummary.substring(0, 300)}...</p>
+                </div>
+                {suggestedQuestions.length > 0 && (
+                  <div>
+                    <p className="mb-1 text-[10px] font-medium text-muted">Suggested questions:</p>
+                    <div className="flex flex-wrap gap-1">
+                      {suggestedQuestions.map((q, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => { setQuestion(q); }}
+                          className="rounded-[6px] border border-border bg-white px-2 py-1 text-[10px] text-muted transition-colors hover:border-primary hover:text-primary"
+                        >
+                          {q}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <form
               onSubmit={submitQuestion}
               className="border-t border-border bg-[rgba(248,251,255,0.85)] p-3"
             >
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <input
                   value={question}
                   onChange={(event) => setQuestion(event.target.value)}
                   placeholder={copy.askPlaceholder}
-                  className="flex-1 rounded-[10px] border border-border bg-white px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted focus:border-primary"
+                  className="min-w-[180px] flex-1 rounded-[10px] border border-border bg-white px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted focus:border-primary"
                 />
-                <button
-                  type="button"
-                  onClick={handleVoiceInput}
-                  disabled={isQuerying && !isVoiceProcessing}
-                  title={getVoiceHelperText()}
-                  className={`inline-flex items-center justify-center rounded-[10px] border px-3 ${
-                    isListening
-                      ? "border-danger bg-danger text-white"
-                      : isVoiceProcessing
-                        ? "border-[#ffd329] bg-[#ffd329] text-[#232323]"
-                        : isVoicePlaying
-                          ? "border-secondary bg-secondary text-white"
-                          : "border-border bg-white text-muted hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
-                  }`}
-                >
-                  {isVoicePlaying ? (
-                    <StopSquareIcon className="h-4 w-4" />
-                  ) : (
-                    <MicPulseIcon className="h-4 w-4" />
-                  )}
-                </button>
+                <VoiceMicButton
+                  scope="reader"
+                  language="auto"
+                  onSubmit={async (payload: VoiceMicSubmitPayload) => {
+                    setQuestion(payload.text);
+                    await submitQuestion(undefined, payload.text);
+                  }}
+                  disabled={isQuerying}
+                  size="sm"
+                  variant="circle"
+                />
                 <Button
                   variant="primary"
                   type="submit"
@@ -1438,23 +1542,110 @@ export default function OperatorReaderPage() {
                   {copy.askButton}
                 </Button>
               </div>
-              <p
-                className={`mt-2 text-xs font-medium ${
-                  isListening
-                    ? "text-danger"
-                    : isVoiceProcessing
-                      ? "text-[#8a6d00]"
-                      : isVoicePlaying
-                        ? "text-secondary"
-                        : "text-muted"
-                }`}
-              >
-                {getVoiceHelperText()}
-              </p>
             </form>
           </section>
         </div>
       </div>
+
+      {isFullscreen && typeof document !== "undefined" && createPortal(
+        <div className="fs-overlay">
+          <div className="fs-topbar">
+            <div className="fs-topbar-left">
+              <span className="fs-doc-code">{headingCode}</span>
+              <span className="fs-doc-sep">|</span>
+              <span className="fs-doc-rev">{revisionLabel}</span>
+              <span className="fs-doc-title">{headingTitle}</span>
+            </div>
+            <div className="fs-topbar-right">
+              <button onClick={() => goToPage(pageNumber - 1)} disabled={pageNumber <= 1 || isPageLoading} className="fs-nav-btn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M15 18L9 12L15 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+              <span className="fs-page-info">{pageNumber}{totalPages > 0 ? ` / ${totalPages}` : ""}</span>
+              <button onClick={() => goToPage(pageNumber + 1)} disabled={isPageLoading || (totalPages > 0 && pageNumber >= totalPages)} className="fs-nav-btn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M9 18L15 12L9 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+              <div className="fs-divider" />
+              <button onClick={() => setIsFullscreenChatOpen(prev => !prev)} className={`fs-nav-btn ${isFullscreenChatOpen ? "fs-nav-active" : ""}`}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M21 15C21 15.53 20.79 16.04 20.41 16.41C20.04 16.79 19.53 17 19 17H7L3 21V5C3 4.47 3.21 3.96 3.59 3.59C3.96 3.21 4.47 3 5 3H19C19.53 3 20.04 3.21 20.41 3.59C20.79 3.96 21 4.47 21 5V15Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+              <div className="fs-divider" />
+              <button onClick={toggleFullscreen} className="fs-exit-btn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 14H10V20" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M20 10H14V4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M14 20L20 14" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/><path d="M4 4L10 10" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/></svg>
+                Exit
+              </button>
+            </div>
+          </div>
+
+          <div className="fs-body">
+            <div className={`fs-document ${isFullscreenChatOpen ? "fs-document-compact" : ""}`}>
+              {isPageLoading ? (
+                <div className="fs-loading">
+                  <div className="fs-spinner" />
+                  <span>{copy.loadingPage}</span>
+                </div>
+              ) : activePdfUrl ? (
+                <PdfViewer pdfUrl={activePdfUrl} currentPage={pageNumber} fallbackImageUrl={pageImageUrl} onLoadError={handlePdfLoadError} />
+              ) : pageText ? (
+                <div className="fs-text-wrap">
+                  <div className="fs-text-content">{pageText}</div>
+                </div>
+              ) : (
+                <div className="fs-empty">{copy.noPreview}</div>
+              )}
+            </div>
+
+            {isFullscreenChatOpen && (
+              <div className="fs-chat-panel">
+                <div className="fs-chat-header">
+                  <span className="fs-chat-title">Chat</span>
+                  <button onClick={() => setIsFullscreenChatOpen(false)} className="fs-chat-close">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6L18 18" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/></svg>
+                  </button>
+                </div>
+                <div className="fs-chat-messages">
+                  {messages.length === 0 && (
+                    <div className="fs-chat-empty">
+                      <p>Ask anything about this document</p>
+                    </div>
+                  )}
+                  {messages.map((message) => (
+                    <div key={message.id} className={`fs-msg ${message.role === "user" ? "fs-msg-user" : "fs-msg-assistant"}`}>
+                      {message.role === "assistant" ? (
+                        <AnswerDisplay
+                          content={message.content}
+                          citations={message.citations}
+                          isStreaming={message.isStreaming}
+                          streamStatus={message.streamStatus}
+                          onCitationClick={(c) => { jumpToCitation(c); }}
+                          onSpeak={() => void requestSpeechForMessage(message.id)}
+                          onHindi={() => void requestHindiTranslation(message.id)}
+                          isPlaying={activeAudioMessageId === message.id && isVoicePlaying}
+                          isHindi={Boolean(message.translatedHindi)}
+                        />
+                      ) : (
+                        <p className="fs-msg-text">{cleanMessageText(message.content)}</p>
+                      )}
+                    </div>
+                  ))}
+                  <div ref={chatEndRef} />
+                </div>
+                <form onSubmit={submitQuestion} className="fs-chat-input">
+                  <input
+                    value={question}
+                    onChange={(event) => setQuestion(event.target.value)}
+                    placeholder={copy.askPlaceholder}
+                    className="fs-chat-field"
+                  />
+                  <button type="submit" disabled={!question.trim() || isQuerying} className="fs-chat-send">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M22 2L11 13M22 2L15 22L11 13M22 2L2 9L11 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  </button>
+                </form>
+              </div>
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
     </OperatorLayout>
   );
 }

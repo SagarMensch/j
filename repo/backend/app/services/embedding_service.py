@@ -32,6 +32,21 @@ def get_embedding_model():
     return _get_local_embedding_model()
 
 
+def get_embedding_dimension() -> int:
+    settings = get_settings()
+    provider = (settings.EMBEDDING_PROVIDER or "local").strip().lower()
+    if provider == "nvidia":
+        model_name = settings.NVIDIA_EMBED_MODEL.lower()
+        if "e5" in model_name or "embedqa" in model_name:
+            return 1024
+        elif "nemotron-embed-1b" in model_name:
+            return 2048
+        elif "embed-vl" in model_name:
+            return 1024
+        return 1024
+    return 384
+
+
 def embed_texts(texts: list[str]) -> list[list[float]]:
     if not texts:
         return []

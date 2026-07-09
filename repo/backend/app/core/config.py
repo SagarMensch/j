@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     NVIDIA_API_BASE_URL: str = "https://integrate.api.nvidia.com/v1"
     NVIDIA_RERANK_BASE_URL: str = "https://ai.api.nvidia.com/v1/retrieval"
     NVIDIA_EMBED_API_KEY: str = ""
-    NVIDIA_EMBED_MODEL: str = "nvidia/llama-nemotron-embed-1b-v2"
+    NVIDIA_EMBED_MODEL: str = "nvidia/nv-embedqa-e5-v5"
     NVIDIA_RERANK_API_KEY: str = ""
     NVIDIA_RERANK_MODEL: str = "nvidia/llama-nemotron-rerank-1b-v2"
     NVIDIA_EMBED_VL_API_KEY: str = ""
@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     NVIDIA_OCR_MODEL: str = "nvidia/nemotron-ocr-v1"
     NVIDIA_CONTENT_SAFETY_API_KEY: str = ""
     NVIDIA_CONTENT_SAFETY_MODEL: str = "nvidia/nemotron-3-content-safety"
+    NVIDIA_VL_REASONING_API_KEY: str = ""
+    NVIDIA_VL_REASONING_MODEL: str = "nvidia/nemotron-nano-12b-v2-vl"
+    NVIDIA_VL_REASONING_TIMEOUT_SECONDS: float = 30.0
     NVIDIA_HTTP_TIMEOUT_SECONDS: float = 30.0
     NVIDIA_CONTENT_SAFETY_TIMEOUT_SECONDS: float = 8.0
     NVIDIA_RERANK_TIMEOUT_SECONDS: float = 15.0

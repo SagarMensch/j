@@ -156,6 +156,7 @@ export default function AssessmentPage() {
       return;
     }
     void handleSubmit();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [answeredCount, isSubmitting, payload, result, timeLeft]);
 
   const questionMarkers = useMemo(() => {

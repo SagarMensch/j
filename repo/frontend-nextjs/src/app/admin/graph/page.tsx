@@ -8,6 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { Maximize2, Minimize2 } from "lucide-react";
+import { Network, Options } from "vis-network";
+import { DataSet } from "vis-data";
 
 type GraphNode = {
   id: string;
@@ -42,67 +45,16 @@ type GraphPayload = {
   diagnostics: Record<string, unknown>;
 };
 
-type SimNode = {
-  id: string;
-  label: string;
-  type: string;
-  radius: number;
-  color: string;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
+const NODE_COLORS: Record<string, { background: string; border: string }> = {
+  Platform: { background: "#eef2ff", border: "#4f46e5" }, // Indigo
+  Document: { background: "#eff6ff", border: "#2563eb" }, // Blue
+  DocumentRevision: { background: "#f0f9ff", border: "#0284c7" }, // Sky
+  TrainingModule: { background: "#ecfdf5", border: "#059669" }, // Emerald
+  Assessment: { background: "#fffbeb", border: "#d97706" }, // Amber
+  User: { background: "#f5f3ff", border: "#7c3aed" }, // Violet
+  Department: { background: "#f8fafc", border: "#475569" }, // Slate
+  Node: { background: "#ffffff", border: "#94a3b8" }, // Default
 };
-
-type SimEdge = {
-  id: string;
-  sourceIndex: number;
-  targetIndex: number;
-  type: string;
-};
-
-type DragState = {
-  nodeId: string;
-  pointerX: number;
-  pointerY: number;
-  moved: boolean;
-};
-
-const NODE_COLORS: Record<string, string> = {
-  Platform: "#0019a8",
-  Document: "#146ef5",
-  DocumentRevision: "#0aa2c0",
-  DocumentChunk: "#5f72ff",
-  TrainingModule: "#00782a",
-  TrainingStep: "#2c9b55",
-  Assessment: "#a86300",
-  User: "#7d2ac8",
-  Department: "#364152",
-  Node: "#4b5563",
-};
-
-function nodeRadiusForType(nodeType: string) {
-  switch (nodeType) {
-    case "Platform":
-      return 20;
-    case "Document":
-      return 14;
-    case "DocumentRevision":
-      return 11;
-    case "TrainingModule":
-      return 12;
-    case "Assessment":
-      return 11;
-    case "User":
-      return 10;
-    default:
-      return 9;
-  }
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
-}
 
 function asString(value: unknown) {
   if (typeof value === "string") return value;
@@ -133,25 +85,10 @@ export default function AdminGraphPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [hoverNodeId, setHoverNodeId] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const simNodesRef = useRef<SimNode[]>([]);
-  const simEdgesRef = useRef<SimEdge[]>([]);
-  const animationFrameRef = useRef<number | null>(null);
-  const selectedNodeIdRef = useRef<string | null>(null);
-  const hoverNodeIdRef = useRef<string | null>(null);
-  const dragRef = useRef<DragState | null>(null);
-  const viewportRef = useRef({ width: 0, height: 0, dpr: 1 });
-
-  useEffect(() => {
-    selectedNodeIdRef.current = selectedNodeId;
-  }, [selectedNodeId]);
-
-  useEffect(() => {
-    hoverNodeIdRef.current = hoverNodeId;
-  }, [hoverNodeId]);
+  const networkRef = useRef<Network | null>(null);
 
   useEffect(() => {
     if (!user?.id) {
@@ -223,378 +160,176 @@ export default function AdminGraphPage() {
     );
   }, [payload?.graph.edges, selectedNodeId]);
 
+  // vis-network initialization
   useEffect(() => {
-    if (!payload?.graph.nodes?.length) {
-      return undefined;
-    }
-
-    const canvas = canvasRef.current;
-    const container = containerRef.current;
-    if (!canvas || !container) {
-      return undefined;
-    }
-
-    const initSimulation = (width: number, height: number) => {
-      const sourceNodes = payload.graph.nodes;
-      const sourceEdges = payload.graph.edges;
-      const focusId = payload.graph.focus_node_id || payload.summary.focus_node_id;
-      const centerX = width * 0.5;
-      const centerY = height * 0.5;
-
-      const simNodes: SimNode[] = sourceNodes.map((node, index) => {
-        const color = NODE_COLORS[node.type] || NODE_COLORS.Node;
-        const radius = nodeRadiusForType(node.type);
-        if (focusId && node.id === focusId) {
-          return {
-            id: node.id,
-            label: node.label,
-            type: node.type,
-            radius,
-            color,
-            x: centerX,
-            y: centerY,
-            vx: 0,
-            vy: 0,
-          };
-        }
-        const angle =
-          (index / Math.max(1, sourceNodes.length)) * Math.PI * 2 +
-          Math.random() * 0.45;
-        const spread = Math.min(width, height) * (0.18 + Math.random() * 0.34);
-        return {
-          id: node.id,
-          label: node.label,
-          type: node.type,
-          radius,
-          color,
-          x: centerX + Math.cos(angle) * spread,
-          y: centerY + Math.sin(angle) * spread,
-          vx: 0,
-          vy: 0,
-        };
-      });
-
-      const indexById = new Map<string, number>();
-      simNodes.forEach((node, index) => {
-        indexById.set(node.id, index);
-      });
-
-      const simEdges: SimEdge[] = [];
-      for (const edge of sourceEdges) {
-        const sourceIndex = indexById.get(edge.source);
-        const targetIndex = indexById.get(edge.target);
-        if (sourceIndex === undefined || targetIndex === undefined) continue;
-        simEdges.push({
-          id: edge.id,
-          sourceIndex,
-          targetIndex,
-          type: edge.type,
-        });
-      }
-
-      simNodesRef.current = simNodes;
-      simEdgesRef.current = simEdges;
-    };
-
-    const applyCanvasSizing = () => {
-      const rect = container.getBoundingClientRect();
-      const width = Math.max(320, Math.floor(rect.width));
-      const height = clamp(
-        Math.floor((typeof window !== "undefined" ? window.innerHeight : 920) - 280),
-        520,
-        760,
-      );
-      const dpr = clamp(
-        typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1,
-        1,
-        2,
-      );
-
-      viewportRef.current = { width, height, dpr };
-      canvas.width = Math.floor(width * dpr);
-      canvas.height = Math.floor(height * dpr);
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
-
-      initSimulation(width, height);
-    };
-
-    const renderFrame = (timestamp: number) => {
-      const { width, height, dpr } = viewportRef.current;
-      const nodes = simNodesRef.current;
-      const edges = simEdgesRef.current;
-      if (!width || !height || !nodes.length) {
-        animationFrameRef.current = requestAnimationFrame(renderFrame);
-        return;
-      }
-
-      const dragState = dragRef.current;
-      const kRepulsion = 5600;
-      const kSpring = 0.012;
-      const damping = 0.92;
-      const centerPull = 0.0014;
-      const minDistance = 36;
-      const centerX = width * 0.5;
-      const centerY = height * 0.5;
-
-      for (let i = 0; i < nodes.length; i += 1) {
-        for (let j = i + 1; j < nodes.length; j += 1) {
-          const a = nodes[i];
-          const b = nodes[j];
-          let dx = a.x - b.x;
-          let dy = a.y - b.y;
-          const distSq = dx * dx + dy * dy + 0.01;
-          if (distSq < minDistance * minDistance) {
-            const bump = 0.02;
-            a.vx += dx * bump;
-            a.vy += dy * bump;
-            b.vx -= dx * bump;
-            b.vy -= dy * bump;
-          }
-          const force = kRepulsion / distSq;
-          const scale = force / Math.sqrt(distSq);
-          dx *= scale;
-          dy *= scale;
-          a.vx += dx;
-          a.vy += dy;
-          b.vx -= dx;
-          b.vy -= dy;
-        }
-      }
-
-      for (const edge of edges) {
-        const source = nodes[edge.sourceIndex];
-        const target = nodes[edge.targetIndex];
-        let dx = target.x - source.x;
-        let dy = target.y - source.y;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
-        const desired = 108;
-        const pull = (dist - desired) * kSpring;
-        dx = (dx / dist) * pull;
-        dy = (dy / dist) * pull;
-        source.vx += dx;
-        source.vy += dy;
-        target.vx -= dx;
-        target.vy -= dy;
-      }
-
-      for (const node of nodes) {
-        if (dragState && dragState.nodeId === node.id) {
-          node.x = dragState.pointerX;
-          node.y = dragState.pointerY;
-          node.vx = 0;
-          node.vy = 0;
-          continue;
-        }
-        node.vx += (centerX - node.x) * centerPull;
-        node.vy += (centerY - node.y) * centerPull;
-        node.vx *= damping;
-        node.vy *= damping;
-        node.x = clamp(node.x + node.vx, 18, width - 18);
-        node.y = clamp(node.y + node.vy, 18, height - 18);
-      }
-
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        animationFrameRef.current = requestAnimationFrame(renderFrame);
-        return;
-      }
-
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, width, height);
-
-      const background = ctx.createLinearGradient(0, 0, width, height);
-      background.addColorStop(0, "#f9fcff");
-      background.addColorStop(1, "#eef3ff");
-      ctx.fillStyle = background;
-      ctx.fillRect(0, 0, width, height);
-
-      const aura = ctx.createRadialGradient(
-        centerX,
-        centerY,
-        50,
-        centerX,
-        centerY,
-        Math.max(width, height) * 0.58,
-      );
-      aura.addColorStop(0, "rgba(0, 25, 168, 0.12)");
-      aura.addColorStop(0.35, "rgba(20, 110, 245, 0.06)");
-      aura.addColorStop(1, "rgba(255, 255, 255, 0)");
-      ctx.fillStyle = aura;
-      ctx.fillRect(0, 0, width, height);
-
-      const ringPulse = (Math.sin(timestamp * 0.0018) + 1) * 0.5;
-      ctx.strokeStyle = `rgba(0, 25, 168, ${0.08 + ringPulse * 0.08})`;
-      ctx.lineWidth = 1.4;
-      for (let i = 0; i < 4; i += 1) {
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, 90 + i * 70 + ringPulse * 8, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-
-      const activeNodeId = selectedNodeIdRef.current;
-      const hoverId = hoverNodeIdRef.current;
-
-      ctx.lineCap = "round";
-      for (const edge of edges) {
-        const source = nodes[edge.sourceIndex];
-        const target = nodes[edge.targetIndex];
-        const edgeActive =
-          source.id === activeNodeId ||
-          target.id === activeNodeId ||
-          source.id === hoverId ||
-          target.id === hoverId;
-
-        ctx.strokeStyle = edgeActive
-          ? "rgba(0, 120, 42, 0.58)"
-          : "rgba(67, 84, 120, 0.22)";
-        ctx.lineWidth = edgeActive ? 2.2 : 1.1;
-        ctx.beginPath();
-        ctx.moveTo(source.x, source.y);
-        ctx.lineTo(target.x, target.y);
-        ctx.stroke();
-      }
-
-      for (const node of nodes) {
-        const isActive = node.id === activeNodeId;
-        const isHover = node.id === hoverId;
-        const glow = isActive ? 24 : isHover ? 17 : 10;
-        const radius = node.radius + (isActive ? 3.5 : isHover ? 1.6 : 0);
-
-        ctx.save();
-        ctx.shadowBlur = glow;
-        ctx.shadowColor = node.color;
-        ctx.fillStyle = node.color;
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.shadowBlur = 0;
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.96)";
-        ctx.lineWidth = isActive ? 2.4 : 1.5;
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      const labelSet = new Set<string>();
-      if (activeNodeId) labelSet.add(activeNodeId);
-      if (hoverId) labelSet.add(hoverId);
-
-      const prominentNodes = [...nodes]
-        .sort(
-          (a, b) =>
-            (degreeByNodeId[b.id] || 0) - (degreeByNodeId[a.id] || 0),
-        )
-        .slice(0, 14);
-      for (const node of prominentNodes) {
-        labelSet.add(node.id);
-      }
-
-      ctx.font = "600 11px Segoe UI, system-ui, sans-serif";
-      for (const nodeId of labelSet) {
-        const node = nodes.find((item) => item.id === nodeId);
-        if (!node) continue;
-        const label = node.label.length > 38 ? `${node.label.slice(0, 35)}...` : node.label;
-        const x = node.x + node.radius + 6;
-        const y = node.y - node.radius - 4;
-        ctx.fillStyle = "rgba(10, 18, 36, 0.88)";
-        ctx.fillText(label, x, y);
-      }
-
-      animationFrameRef.current = requestAnimationFrame(renderFrame);
-    };
-
-    applyCanvasSizing();
-    const resizeObserver = new ResizeObserver(() => {
-      applyCanvasSizing();
-    });
-    resizeObserver.observe(container);
-
-    animationFrameRef.current = requestAnimationFrame(renderFrame);
-
-    return () => {
-      resizeObserver.disconnect();
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = null;
-      }
-    };
-  }, [degreeByNodeId, payload]);
-
-  const toCanvasPoint = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return null;
-    const rect = canvas.getBoundingClientRect();
-    return {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
-    };
-  };
-
-  const findNodeAt = (x: number, y: number) => {
-    let hit: SimNode | null = null;
-    let hitDistance = 1000;
-    for (const node of simNodesRef.current) {
-      const dx = node.x - x;
-      const dy = node.y - y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      const threshold = node.radius + 9;
-      if (distance <= threshold && distance < hitDistance) {
-        hit = node;
-        hitDistance = distance;
-      }
-    }
-    return hit;
-  };
-
-  const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    const point = toCanvasPoint(event);
-    if (!point) return;
-    const hit = findNodeAt(point.x, point.y);
-    if (!hit) return;
-    dragRef.current = {
-      nodeId: hit.id,
-      pointerX: point.x,
-      pointerY: point.y,
-      moved: false,
-    };
-    setSelectedNodeId(hit.id);
-    setHoverNodeId(hit.id);
-    event.currentTarget.setPointerCapture(event.pointerId);
-  };
-
-  const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    const point = toCanvasPoint(event);
-    if (!point) return;
-    const dragState = dragRef.current;
-    if (dragState) {
-      dragState.pointerX = point.x;
-      dragState.pointerY = point.y;
-      dragState.moved = true;
-      setHoverNodeId(dragState.nodeId);
+    if (!payload?.graph.nodes?.length || !containerRef.current) {
       return;
     }
-    const hit = findNodeAt(point.x, point.y);
-    const nextHover = hit?.id || null;
-    if (nextHover !== hoverNodeIdRef.current) {
-      setHoverNodeId(nextHover);
-    }
-  };
 
-  const handlePointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    const dragState = dragRef.current;
-    if (dragState && !dragState.moved) {
-      setSelectedNodeId(dragState.nodeId);
-    }
-    dragRef.current = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  };
+    const nodesData = new DataSet(
+      payload.graph.nodes.map((node) => {
+        const colorSet = NODE_COLORS[node.type] || NODE_COLORS.Node;
+        const degree = degreeByNodeId[node.id] || 0;
+        const isCentral = node.label.toLowerCase().includes("aarav");
+        
+        return {
+          id: node.id,
+          label: node.label.length > 25 ? node.label.slice(0, 22) + "..." : node.label,
+          title: `${node.label} (${node.type})`, // Tooltip
+          shape: "dot",
+          size: isCentral ? 35 : Math.max(12, 10 + degree * 2),
+          color: {
+            background: colorSet.background,
+            border: colorSet.border,
+            highlight: {
+              background: "#ffffff",
+              border: "#0f172a",
+            },
+            hover: {
+              background: "#ffffff",
+              border: "#334155",
+            },
+          },
+          borderWidth: 2,
+          font: {
+            size: isCentral ? 16 : 12,
+            face: "Segoe UI, sans-serif",
+            color: "#0f172a",
+            strokeWidth: 3,
+            strokeColor: "#ffffff",
+          },
+          shadow: {
+            enabled: true,
+            color: "rgba(0,0,0,0.1)",
+            size: 10,
+            x: 0,
+            y: 4,
+          },
+        };
+      })
+    );
 
-  const handlePointerLeave = () => {
-    if (!dragRef.current) {
-      setHoverNodeId(null);
+    const edgesData = new DataSet(
+      payload.graph.edges.map((edge) => {
+        const sourceNode = nodeMap.get(edge.source);
+        const targetNode = nodeMap.get(edge.target);
+        const hoverText = sourceNode && targetNode 
+            ? `${sourceNode.label}  ➡️  ${edge.type}  ➡️  ${targetNode.label}`
+            : edge.type;
+
+        return {
+          id: edge.id,
+          from: edge.source,
+          to: edge.target,
+          label: edge.type,
+          title: hoverText,
+          arrows: {
+            to: { enabled: true, scaleFactor: 1.4, type: "arrow" }
+          },
+          color: {
+            color: "#94a3b8",
+            highlight: "#334155",
+            hover: "#64748b",
+          },
+          font: {
+            size: 11,
+            color: "#475569",
+            align: "middle",
+            strokeWidth: 3,
+            strokeColor: "#ffffff",
+          },
+          smooth: {
+            type: "dynamic",
+          },
+        };
+      })
+    );
+
+    const data = {
+      nodes: nodesData,
+      edges: edgesData,
+    };
+
+    const options: Options = {
+      autoResize: true,
+      physics: {
+        forceAtlas2Based: {
+          gravitationalConstant: -100,
+          centralGravity: 0.01,
+          springLength: 150,
+          springConstant: 0.04,
+        },
+        maxVelocity: 50,
+        solver: "forceAtlas2Based",
+        timestep: 0.35,
+        stabilization: {
+          enabled: true,
+          iterations: 150,
+        },
+      },
+      interaction: {
+        hover: true,
+        tooltipDelay: 200,
+        zoomView: true,
+        dragView: true,
+        dragNodes: true,
+      },
+    };
+
+    const network = new Network(containerRef.current, data, options);
+    networkRef.current = network;
+
+    if (selectedNodeId) {
+      network.selectNodes([selectedNodeId]);
+    }
+
+    network.on("click", (params) => {
+      if (params.nodes.length > 0) {
+        setSelectedNodeId(params.nodes[0] as string);
+      } else {
+        setSelectedNodeId(null);
+      }
+    });
+
+    return () => {
+      network.destroy();
+    };
+  }, [payload, degreeByNodeId]);
+
+  useEffect(() => {
+    if (networkRef.current && selectedNodeId) {
+      const selected = networkRef.current.getSelection().nodes;
+      if (!selected.includes(selectedNodeId)) {
+        networkRef.current.selectNodes([selectedNodeId]);
+      }
+    }
+  }, [selectedNodeId]);
+
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        if (wrapperRef.current) {
+          await wrapperRef.current.requestFullscreen();
+        }
+      } else {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        }
+      }
+    } catch (err) {
+      console.error("Fullscreen API failed", err);
+      // Fallback to CSS fullscreen
+      setIsFullscreen(!isFullscreen);
     }
   };
 
@@ -614,11 +349,6 @@ export default function AdminGraphPage() {
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              {/*<Badge variant={payload?.source === "neo4j" ? "success" : "warning"}>
-                {payload?.source === "neo4j"
-                  ? "Neo4j Graph Live"
-                  : "Fallback Graph Active"}
-              </Badge>*/}
               <Badge variant="info">Interactive Node Navigation</Badge>
             </div>
           </div>
@@ -639,33 +369,42 @@ export default function AdminGraphPage() {
           </Card>
         ) : payload ? (
           <div className="grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
-            <Card title="Graph Canvas" className="!p-0">
-              <div className="border-b border-border px-4 py-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="default">
-                    {payload.summary.node_count} nodes
-                  </Badge>
-                  <Badge variant="default">
-                    {payload.summary.edge_count} relationships
-                  </Badge>
-                  {/*<Badge variant="info">
-                    Status: {payload.status}
-                  </Badge>*/}
-                </div>
-              </div>
-              <div
-                ref={containerRef}
-                className="relative overflow-hidden rounded-b-[18px]"
+            <Card title="Graph Canvas" className="!p-0 border-0 shadow-sm relative">
+              <div 
+                ref={wrapperRef} 
+                className={`flex flex-col bg-white ${isFullscreen ? "h-screen w-screen" : "h-full w-full rounded-xl border border-border"}`}
               >
-                <canvas
-                  ref={canvasRef}
-                  onPointerDown={handlePointerDown}
-                  onPointerMove={handlePointerMove}
-                  onPointerUp={handlePointerUp}
-                  onPointerCancel={handlePointerUp}
-                  onPointerLeave={handlePointerLeave}
-                  className="block w-full cursor-crosshair bg-transparent"
-                />
+                <div className="border-b border-border px-4 py-3 bg-white flex justify-between items-center rounded-t-xl">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="default">
+                      {payload.summary.node_count} nodes
+                    </Badge>
+                    <Badge variant="default">
+                      {payload.summary.edge_count} relationships
+                    </Badge>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={toggleFullscreen}>
+                    {isFullscreen ? (
+                      <>
+                        <Minimize2 className="mr-2 h-4 w-4" />
+                        Exit Full Screen
+                      </>
+                    ) : (
+                      <>
+                        <Maximize2 className="mr-2 h-4 w-4" />
+                        Full Screen
+                      </>
+                    )}
+                  </Button>
+                </div>
+                <div
+                  ref={containerRef}
+                  className={`relative overflow-hidden bg-[#f8fafc] flex-1 ${
+                    !isFullscreen ? "min-h-[600px] rounded-b-xl" : ""
+                  }`}
+                >
+                  {/* vis-network injects canvas here */}
+                </div>
               </div>
             </Card>
 
@@ -717,34 +456,14 @@ export default function AdminGraphPage() {
                 )}
               </Card>
 
-              <Card title="Connectivity Snapshot">
-                <div className="space-y-2">
-                  {Object.entries(payload.summary.node_types)
-                    .slice(0, 8)
-                    .map(([type, count]) => (
-                      <div
-                        key={type}
-                        className="flex items-center justify-between rounded-[8px] border border-border bg-muted-light px-3 py-2"
-                      >
-                        <span className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">
-                          {type}
-                        </span>
-                        <span className="text-sm font-semibold text-foreground">
-                          {count}
-                        </span>
-                      </div>
-                    ))}
-                </div>
-              </Card>
-
               <Card title="Selected Links">
                 {selectedNodeRelations.length === 0 ? (
                   <p className="text-sm text-muted">
                     No relationships to display for this node.
                   </p>
                 ) : (
-                  <div className="space-y-2">
-                    {selectedNodeRelations.slice(0, 10).map((edge) => {
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                    {selectedNodeRelations.map((edge) => {
                       const otherId =
                         edge.source === selectedNodeId ? edge.target : edge.source;
                       const otherNode = nodeMap.get(otherId);

@@ -56,7 +56,7 @@ interface StepProgressProps {
 export function StepProgress({
   currentStep,
   totalSteps,
-  steps,
+  steps: _steps,
 }: StepProgressProps) {
   return (
     <div className="w-full">

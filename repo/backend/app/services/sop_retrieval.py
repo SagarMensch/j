@@ -1,3 +1,4 @@
+import json
 import re
 import time
 import uuid
@@ -8,7 +9,7 @@ from sqlalchemy import text
 from app.core.config import get_settings
 from app.db.postgres import engine
 from app.services.bm25_retriever import get_bm25_retriever
-from app.services.embedding_service import embed_query
+from app.services.embedding_service import embed_query, embed_texts
 from app.services.nvidia_nim import embed_query_vl_nvidia, embed_visual_pages_vl_nvidia
 from app.services.reranker import rerank_evidence
 
@@ -156,60 +157,28 @@ LINE_RANGE_SQL = text(
 )
 
 
-def _normalize_scores(raw_scores: dict[str, float]) -> dict[str, float]:
-    if not raw_scores:
-        return {}
-    values = list(raw_scores.values())
-    v_min = min(values)
-    v_max = max(values)
-    if v_max - v_min < 1e-9:
-        return {k: (1.0 if v_max > 0 else 0.0) for k in raw_scores}
-    return {k: (v - v_min) / (v_max - v_min) for k, v in raw_scores.items()}
-
-
-def _to_vector_literal(vector: list[float]) -> str:
-    return "[" + ",".join(f"{float(v):.8f}" for v in vector) + "]"
-
-
 _ORDINAL_WORDS = {
-    "first": 1,
-    "1st": 1,
-    "one": 1,
-    "second": 2,
-    "2nd": 2,
-    "two": 2,
-    "third": 3,
-    "3rd": 3,
-    "three": 3,
-    "fourth": 4,
-    "4th": 4,
-    "four": 4,
-    "fifth": 5,
-    "5th": 5,
-    "five": 5,
+    "first": 1, "1st": 1, "one": 1,
+    "second": 2, "2nd": 2, "two": 2,
+    "third": 3, "3rd": 3, "three": 3,
+    "fourth": 4, "4th": 4, "four": 4,
+    "fifth": 5, "5th": 5, "five": 5,
 }
 
 _VISUAL_QUERY_TERMS = {
-    "diagram",
-    "figure",
-    "table",
-    "image",
-    "photo",
-    "picture",
-    "layout",
-    "screenshot",
-    "scan",
-    "scanned",
-    "label",
-    "form",
-    "drawing",
-    "p&id",
+    "diagram", "figure", "table", "image", "photo", "picture",
+    "layout", "screenshot", "scan", "scanned", "label", "form",
+    "drawing", "p&id", "schematic", "flowchart", "chart", "graph",
+    "blueprint", "sketch", "illustration", "plot",
 }
 
 
 def _extract_ordinal_reference(query_text: str) -> int | None:
     lowered = (query_text or "").lower()
-    match = re.search(r"\b(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th|one|two|three|four|five)\b\s+(?:sop|document|manual)\b", lowered)
+    match = re.search(
+        r"\b(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th|one|two|three|four|five)\b\s+(?:sop|document|manual)\b",
+        lowered,
+    )
     if not match:
         return None
     return _ORDINAL_WORDS.get(match.group(1))
@@ -217,9 +186,13 @@ def _extract_ordinal_reference(query_text: str) -> int | None:
 
 def _extract_page_reference(query_text: str) -> int | None:
     lowered = (query_text or "").lower()
-    match = re.search(r"\b(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th|\d+)\s+page\b", lowered)
+    match = re.search(
+        r"\b(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th|\d+)\s+page\b", lowered
+    )
     if not match:
-        match = re.search(r"\bpage\s+(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th|\d+)\b", lowered)
+        match = re.search(
+            r"\bpage\s+(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th|\d+)\b", lowered
+        )
     if not match:
         return None
     token = match.group(1)
@@ -228,7 +201,9 @@ def _extract_page_reference(query_text: str) -> int | None:
     return _ORDINAL_WORDS.get(token)
 
 
-def _page_match_score(page_start: int | None, page_end: int | None, requested_page: int | None) -> float:
+def _page_match_score(
+    page_start: int | None, page_end: int | None, requested_page: int | None
+) -> float:
     if requested_page is None:
         return 0.0
     if page_start is None and page_end is None:
@@ -243,6 +218,73 @@ def _page_match_score(page_start: int | None, page_end: int | None, requested_pa
     if nearest == 2:
         return 0.15
     return 0.0
+
+
+def _generate_query_variants(query_text: str) -> list[str]:
+    variants = [query_text]
+    lowered = query_text.lower().strip()
+
+    stripped = re.sub(r"\b(what|how|when|where|which|who|why|is|are|do|does|did|can|could|should|would|will)\b", " ", lowered).strip()
+    if stripped and stripped != lowered and len(stripped.split()) >= 2:
+        variants.append(stripped)
+
+    if "?" in query_text:
+        content = re.sub(r"[\?]", " ", query_text).strip()
+        if content:
+            variants.append(content)
+
+    words = query_text.split()
+    if len(words) > 5:
+        mid = len(words) // 2
+        variants.append(" ".join(words[:mid]))
+        variants.append(" ".join(words[mid:]))
+
+    entities = re.findall(r"\b[A-Z][A-Za-z0-9_\-]{2,}\b", query_text)
+    if entities:
+        variants.append(" ".join(entities))
+
+    return list(dict.fromkeys(variants))
+
+
+def _rrf_fusion(
+    ranked_lists: list[list[str]],
+    k: int = 60,
+) -> list[tuple[str, float]]:
+    scores: dict[str, float] = {}
+    for ranked in ranked_lists:
+        for rank, chunk_id in enumerate(ranked):
+            rrf_score = 1.0 / (k + rank + 1)
+            scores[chunk_id] = scores.get(chunk_id, 0.0) + rrf_score
+    sorted_chunks = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    return sorted_chunks
+
+
+def _adaptive_weights(
+    lexical_count: int,
+    semantic_count: int,
+    multimodal_count: int,
+) -> dict[str, float]:
+    total = lexical_count + semantic_count + multimodal_count + 1
+
+    lexical_signal = min(lexical_count / max(total, 1), 1.0)
+    semantic_signal = min(semantic_count / max(total, 1), 1.0)
+    multimodal_signal = min(multimodal_count / max(total, 1), 1.0)
+
+    w_lexical = 0.30 + 0.20 * lexical_signal
+    w_semantic = 0.35 + 0.15 * semantic_signal
+    w_multimodal = 0.15 + 0.20 * multimodal_signal
+
+    total_w = w_lexical + w_semantic + w_multimodal
+    if total_w > 0:
+        w_lexical /= total_w
+        w_semantic /= total_w
+        w_multimodal /= total_w
+
+    return {
+        "lexical": round(w_lexical, 3),
+        "semantic": round(w_semantic, 3),
+        "multimodal": round(w_multimodal, 3),
+    }
 
 
 class SOPRetriever:
@@ -301,6 +343,47 @@ class SOPRetriever:
             ).mappings().all()
 
         return [dict(row) for row in rows]
+
+    def _multi_query_semantic_search(
+        self,
+        query_text: str,
+        k: int,
+        revision_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        variants = _generate_query_variants(query_text)
+
+        all_ranked_lists: list[list[str]] = []
+        all_scores: dict[str, float] = {}
+        all_metadata: dict[str, dict[str, Any]] = {}
+
+        for variant in variants[:4]:
+            try:
+                results = self._semantic_search(variant, k, revision_id)
+                ranked_ids = []
+                for r in results:
+                    cid = r["chunk_id"]
+                    ranked_ids.append(cid)
+                    all_scores[cid] = max(all_scores.get(cid, 0.0), float(r.get("semantic_score", 0.0)))
+                    all_metadata[cid] = r
+                all_ranked_lists.append(ranked_ids)
+            except Exception:
+                continue
+
+        if len(all_ranked_lists) <= 1:
+            results = self._semantic_search(query_text, k, revision_id)
+            return results
+
+        fused = _rrf_fusion(all_ranked_lists)
+
+        final_results = []
+        for chunk_id, rrf_score in fused[:k]:
+            if chunk_id in all_metadata:
+                meta = all_metadata[chunk_id]
+                meta["semantic_score"] = all_scores.get(chunk_id, rrf_score)
+                meta["rrf_score"] = rrf_score
+                final_results.append(meta)
+
+        return final_results
 
     def _attach_line_ranges(self, evidence: list[dict[str, Any]]) -> None:
         if not evidence:
@@ -476,7 +559,7 @@ class SOPRetriever:
             resolved_revision_id, resolved_revision_meta = self._resolve_revision_hint(query_text)
 
         document_specific_page_lookup = resolved_revision_id is not None and requested_page is not None
-        k = max(1, min(top_k + 2, 12))
+        k = max(1, min(top_k + 2, 15))
         if document_specific_page_lookup:
             k = max(3, min(top_k + 1, 8))
 
@@ -495,7 +578,7 @@ class SOPRetriever:
         semantic: list[dict[str, Any]] = []
         if not document_specific_page_lookup:
             try:
-                semantic = self._semantic_search(
+                semantic = self._multi_query_semantic_search(
                     query_text,
                     k * 2,
                     revision_id=resolved_revision_id,
@@ -515,6 +598,18 @@ class SOPRetriever:
             except Exception as e:
                 print(f"Page multimodal search failed: {e}")
                 multimodal_pages = []
+
+        lexical_ranked = [r["chunk_id"] for r in lexical]
+        semantic_ranked = [r["chunk_id"] for r in semantic]
+        multimodal_ranked = [p.get("page_id", "") for p in multimodal_pages]
+
+        if len(lexical_ranked) > 1 and len(semantic_ranked) > 1:
+            fused = _rrf_fusion([lexical_ranked, semantic_ranked])
+            fused_order = [cid for cid, _ in fused]
+        else:
+            fused_order = lexical_ranked + [c for c in semantic_ranked if c not in set(lexical_ranked)]
+
+        weights = _adaptive_weights(len(lexical), len(semantic), len(multimodal_pages))
 
         candidates: dict[str, dict[str, Any]] = {}
 
@@ -541,30 +636,32 @@ class SOPRetriever:
 
         evidence = []
         for cid, c in candidates.items():
-            l = c.get("lexical_score_raw", 0.0)
-            s = c.get("semantic_score_raw", 0.0)
+            l_raw = c.get("lexical_score_raw", 0.0)
+            s_raw = c.get("semantic_score_raw", 0.0)
 
-            if max_lexical > 0:
-                l_norm = l / max_lexical
-            else:
-                l_norm = 0.0
-
-            if max_semantic > 0:
-                s_norm = s / max_semantic
-            else:
-                s_norm = 0.0
+            l_norm = l_raw / max_lexical if max_lexical > 0 else 0.0
+            s_norm = s_raw / max_semantic if max_semantic > 0 else 0.0
 
             block_ids = c.get("block_ids") or []
             if isinstance(block_ids, str):
                 try:
-                    import json
-
                     block_ids = json.loads(block_ids)
                 except Exception:
                     block_ids = []
 
             page_bonus = _page_match_score(c.get("page_start"), c.get("page_end"), requested_page)
-            final_score = (0.55 * l_norm) + (0.30 * s_norm) + (0.15 * page_bonus)
+
+            rrf_position_bonus = 0.0
+            if cid in fused_order:
+                pos = fused_order.index(cid)
+                rrf_position_bonus = max(0.0, 1.0 - (pos / max(len(fused_order), 1)))
+
+            final_score = (
+                weights["lexical"] * l_norm
+                + weights["semantic"] * s_norm
+                + 0.15 * page_bonus
+                + 0.10 * rrf_position_bonus
+            )
 
             evidence.append({
                 "chunk_id": cid,
@@ -588,6 +685,7 @@ class SOPRetriever:
                     "lexical": round(l_norm, 6),
                     "semantic": round(s_norm, 6),
                     "page_match": round(page_bonus, 6),
+                    "rrf_position": round(rrf_position_bonus, 6),
                     "multimodal": 0.0,
                     "final": round(final_score, 6),
                 },
@@ -623,6 +721,7 @@ class SOPRetriever:
                         "lexical": 0.0,
                         "semantic": 0.0,
                         "page_match": round(page_bonus, 6),
+                        "rrf_position": 0.0,
                         "multimodal": round(multimodal_norm, 6),
                         "final": round((0.85 * multimodal_norm) + (0.15 * page_bonus), 6),
                     },
@@ -674,9 +773,16 @@ class SOPRetriever:
                 "resolved_document_code": resolved_revision_meta.get("document_code") if resolved_revision_meta else None,
                 "resolved_document_title": resolved_revision_meta.get("document_title") if resolved_revision_meta else None,
                 "requested_page": requested_page,
+                "fusion_weights": weights,
+                "rrf_fused_count": len(fused_order) if len(lexical_ranked) > 1 and len(semantic_ranked) > 1 else 0,
+                "query_variants_used": len(_generate_query_variants(query_text)),
                 "reranker": reranker_diagnostics,
             }
         }
+
+
+def _to_vector_literal(vector: list[float]) -> str:
+    return "[" + ",".join(f"{float(v):.8f}" for v in vector) + "]"
 
 
 _retriever = None

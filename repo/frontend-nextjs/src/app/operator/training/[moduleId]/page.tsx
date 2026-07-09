@@ -571,6 +571,7 @@ export default function TrainingModulePage() {
       return;
     }
     void ensureTranslatedStep(currentStep, language);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStep, language]);
 
   async function playAudioBase64(
@@ -786,6 +787,11 @@ export default function TrainingModulePage() {
                         </Button>
                       </Link>
                     ) : null}
+                    <Link href={`/operator/training/${moduleId}/avatar`}>
+                      <Button variant="primary" size="sm">
+                        Train with AI
+                      </Button>
+                    </Link>
                   </div>
                   <div>
                     <h1 className="text-[1.85rem] font-bold tracking-[-0.03em] text-foreground">

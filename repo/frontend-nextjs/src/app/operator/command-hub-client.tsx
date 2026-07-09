@@ -9,8 +9,13 @@ import { AppLanguage, useAuth } from "@/lib/auth-context";
 import { trackEvent } from "@/lib/telemetry";
 import { apiClient, API_BASE_URL, postJsonSse } from "@/lib/api";
 import {
+  VoiceMicButton,
+  VoiceMicSubmitPayload,
+} from "@/components/ui/voice-mic-button";
+import { RunGuide } from "@/components/run-guide/run-guide";
+import { PredictiveQuestions } from "@/components/operator/predictive-questions";
+import {
   DocumentStackIcon,
-  MicPulseIcon,
   SearchGridIcon,
   SpeakerWaveIcon,
   StopSquareIcon,
@@ -21,6 +26,7 @@ import {
   XpPanel,
   deriveGameProfile,
 } from "@/components/ui/gamification";
+import { blobToWav } from "@/lib/audioToWav";
 
 type CitationType = {
   chunkId: string;
@@ -93,11 +99,28 @@ type QueryApiResponse = {
   evidence?: QueryEvidencePayload[];
 };
 
+type OperationGuideState = {
+  equipment?: string;
+  task?: string;
+  prerequisites?: Record<string, boolean>;
+  steps?: Array<{
+    id: number;
+    instruction: string;
+    citation?: string;
+    citationLabel?: string;
+    expectedState?: string;
+    riskLevel?: "low" | "medium" | "high";
+    estimatedSeconds?: number;
+    category?: string;
+  }>;
+  [key: string]: unknown;
+};
+
 type OperationGuideApiResponse = {
   answer: string;
   mode: "clarify" | "learn" | "run" | "blocked";
   next_actions?: string[];
-  state?: Record<string, unknown>;
+  state?: OperationGuideState;
   state_label?: string | null;
   step_index?: number | null;
   requires_supervisor?: boolean;
@@ -201,6 +224,20 @@ type ChatMessage = {
   operationStepIndex?: number | null;
   requiresSupervisor?: boolean;
   completionRecordId?: string | null;
+  guidedEquipment?: string;
+  guidedTask?: string;
+  guidedPrerequisites?: Record<string, boolean>;
+  guidedTotalSteps?: number;
+  guidedSteps?: Array<{
+    id: number;
+    instruction: string;
+    citation?: string;
+    citationLabel?: string;
+    expectedState?: string;
+    riskLevel?: "low" | "medium" | "high";
+    estimatedSeconds?: number;
+    category?: string;
+  }>;
 };
 
 type DashboardSummaryResponse = {
@@ -621,12 +658,24 @@ function getHighlightBoxes(
 }
 
 function normalizeAnswerText(text: string) {
-  return text
-    .replace(/\*\*(.*?)\*\*/g, "$1")
-    .replace(/__(.*?)__/g, "$1")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/\r/g, "")
-    .trim();
+  let cleaned = text;
+  cleaned = cleaned.replace(/```[\s\S]*?```/g, "");
+  cleaned = cleaned.replace(/`([^`]+)`/g, "$1");
+  cleaned = cleaned.replace(/\|[-]+\|[-]+\|/g, "");
+  cleaned = cleaned.replace(/\|([^|]+)\|([^|]+)\|/g, "$1: $2");
+  cleaned = cleaned.replace(/^\|.*\|$/gm, "");
+  cleaned = cleaned.replace(/^[-]{3,}$/gm, "");
+  cleaned = cleaned.replace(/^={3,}$/gm, "");
+  cleaned = cleaned.replace(/^[_]{3,}$/gm, "");
+  cleaned = cleaned.replace(/^#+\s*/gm, "");
+  cleaned = cleaned.replace(/\*\*(.*?)\*\*/g, "$1");
+  cleaned = cleaned.replace(/__(.*?)__/g, "$1");
+  cleaned = cleaned.replace(/\*([^*]+)\*/g, "$1");
+  cleaned = cleaned.replace(/_([^_]+)_/g, "$1");
+  cleaned = cleaned.replace(/\n{3,}/g, "\n\n");
+  cleaned = cleaned.replace(/\r/g, "");
+  cleaned = cleaned.split("\n").map((l: string) => l.trim()).join("\n");
+  return cleaned.trim();
 }
 
 function parseAnswerParagraphs(
@@ -1120,6 +1169,7 @@ export default function InformationLookup() {
     return () => {
       cancelled = true;
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, conversationScopeTab]);
 
   const getRecordingMimeType = () => {
@@ -1535,9 +1585,18 @@ export default function InformationLookup() {
         return;
       }
 
-      const audioBlob = new Blob(chunks, {
+      const rawBlob = new Blob(chunks, {
         type: recorder.mimeType || mimeType || "audio/webm",
       });
+
+      // Convert to WAV so Sarvam STT accepts the audio format
+      let audioBlob: Blob;
+      try {
+        audioBlob = await blobToWav(rawBlob);
+      } catch {
+        console.warn("Command Hub voice: WAV conversion failed, using raw blob");
+        audioBlob = rawBlob;
+      }
 
       if (!audioBlob.size) {
         console.warn("Command Hub voice: audio blob is empty");
@@ -1769,6 +1828,11 @@ export default function InformationLookup() {
           operationStepIndex: guidedResponse.step_index || null,
           requiresSupervisor: Boolean(guidedResponse.requires_supervisor),
           completionRecordId: guidedResponse.completion_record_id || null,
+          guidedEquipment: guidedResponse.state?.equipment || null,
+          guidedTask: guidedResponse.state?.task || null,
+guidedPrerequisites: guidedResponse.state?.prerequisites || null,
+                        guidedTotalSteps: 9,
+                        guidedSteps: guidedResponse.state?.steps || [],
           isStreaming: false,
           streamStatus: null,
         }));
@@ -1908,6 +1972,7 @@ export default function InformationLookup() {
     initialQueryHandledRef.current = true;
     setSearchQuery(query);
     void handleSearch(query);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const dashboardStats = dashboardData?.stats;
@@ -2407,23 +2472,18 @@ export default function InformationLookup() {
                     rows={4}
                     className="w-full resize-none rounded-[10px] border border-[#d0d8e6] bg-white px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted focus:border-secondary"
                   />
-                  <div className="mt-2.5 flex items-center justify-between gap-2">
-                    <button
-                      onClick={handleVoiceInput}
-                      disabled={isQuerying && !isVoiceProcessing}
-                      className={`inline-flex items-center gap-2 rounded-[8px] border px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] ${
-                        isListening
-                          ? "border-danger bg-danger text-white"
-                          : isVoiceProcessing
-                            ? "border-[#ffd329] bg-[#ffd329] text-[#232323]"
-                            : isVoicePlaying
-                              ? "border-secondary bg-secondary text-white"
-                              : "border-border bg-white text-muted hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
-                      }`}
-                    >
-                      <SiriRing animate={voiceState !== "idle"} />
-                      {getVoiceButtonLabel()}
-                    </button>
+                  <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
+                    <VoiceMicButton
+                      scope="general"
+                      language="auto"
+                      onSubmit={async (payload: VoiceMicSubmitPayload) => {
+                        setSearchQuery(payload.text);
+                        setIsFreshChatOpen(true);
+                        setIsConversationViewOpen(true);
+                        await handleSearch(payload.text);
+                      }}
+                      disabled={isQuerying}
+                    />
                     <Button
                       variant="primary"
                       onClick={() => void handleSearch()}
@@ -2434,19 +2494,7 @@ export default function InformationLookup() {
                       {copy.askButton}
                     </Button>
                   </div>
-                  <p
-                    className={`mt-2 text-xs font-medium ${
-                      isListening
-                        ? "text-danger"
-                        : isVoiceProcessing
-                          ? "text-[#8a6d00]"
-                          : isVoicePlaying
-                            ? "text-secondary"
-                            : "text-muted"
-                    }`}
-                  >
-                    {getVoiceHelperText()}
-                  </p>
+                  <p className="mt-2 text-xs font-medium text-muted">Live STT available — tap the mic to speak</p>
                 </div>
 
                 <div className="mt-3 grid gap-2 sm:grid-cols-3">
@@ -2541,6 +2589,33 @@ export default function InformationLookup() {
               </div>
 
               <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+                {conversationScopeTab === "guided" && (() => {
+                  const lastGuided = [...chatMessages].reverse().find(m => m.responseMode === "operation" && m.role === "assistant");
+                  if (lastGuided) {
+                    const equipment = lastGuided.guidedEquipment || "Select equipment";
+                    const task = lastGuided.guidedTask || "Select task";
+const prereqs = (lastGuided.guidedPrerequisites || {
+                        authorization: false,
+                        ppe: false,
+                        permit_isolation: false,
+                        area_safe: false,
+                      }) as { authorization: boolean; ppe: boolean; permit_isolation: boolean; area_safe: boolean };
+                    return (
+                      <RunGuide
+                        equipment={equipment}
+                        task={task}
+                        totalSteps={lastGuided.guidedTotalSteps || 9}
+                        currentStep={lastGuided.operationStepIndex || 0}
+                        prerequisites={prereqs}
+                        steps={lastGuided.guidedSteps || []}
+                        onNewGuide={startNewConversation}
+                        operatorName={user?.name}
+                        shift={undefined}
+                      />
+                    );
+                  }
+                  return null;
+                })()}
                 {chatMessages.map((msg, idx) => (
                   <div
                     key={msg.id}
@@ -2582,12 +2657,53 @@ export default function InformationLookup() {
                                 </span>
                               ) : null}
                               {msg.completionRecordId ? (
-                                <span className="rounded-full bg-secondary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-secondary">
+                                <span className="rounded-full bg-[#16a34a]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#16a34a]">
                                   {msg.completionRecordId}
                                 </span>
                               ) : null}
                             </div>
-                            {!msg.isStreaming ? (
+                          </div>
+
+                          {msg.responseMode === "operation" && msg.operationStepIndex && msg.operationStepIndex > 0 && (
+                            <div className="mb-3">
+                              <div className="flex items-center justify-between mb-1.5">
+                                <span className="text-[11px] font-semibold text-muted uppercase tracking-[0.06em]">Progress</span>
+                                <span className="text-[11px] font-semibold text-primary">{msg.operationStepIndex}/9</span>
+                              </div>
+                              <div className="h-1.5 rounded-full bg-[#e5e7eb] overflow-hidden">
+                                <div
+                                  className="h-full rounded-full bg-primary transition-all duration-500"
+                                  style={{ width: `${(msg.operationStepIndex / 9) * 100}%` }}
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          {msg.responseMode === "operation" && (
+                            <div className="mb-3 flex flex-wrap gap-1.5">
+                              {Array.from({ length: 9 }, (_, i) => {
+                                const stepNum = i + 1;
+                                const isCompleted = msg.operationStepIndex && stepNum < msg.operationStepIndex;
+                                const isCurrent = msg.operationStepIndex === stepNum;
+                                return (
+                                  <div
+                                    key={stepNum}
+                                    className={`flex items-center justify-center w-6 h-6 rounded-full text-[10px] font-bold transition-all ${
+                                      isCompleted
+                                        ? "bg-[#16a34a] text-white"
+                                        : isCurrent
+                                        ? "bg-primary text-white ring-2 ring-primary/20"
+                                        : "bg-[#f3f4f6] text-[#9ca3af]"
+                                    }`}
+                                  >
+                                    {isCompleted ? "\u2713" : stepNum}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {!msg.isStreaming ? (
                             <div className="flex items-center gap-1.5">
                               <button
                                 type="button"
@@ -2615,8 +2731,7 @@ export default function InformationLookup() {
                                 )}
                               </button>
                             </div>
-                            ) : null}
-                          </div>
+                          ) : null}
                           {msg.isStreaming ? (
                             <div className="mb-3 rounded-[12px] border border-[#c9d6f2] bg-[#f5f8ff] px-3 py-2 shadow-[0_8px_22px_rgba(0,25,168,0.06)]">
                               <div className="flex items-center gap-2 text-[12px] font-semibold text-[#2947b2]">
@@ -2752,6 +2867,20 @@ export default function InformationLookup() {
                     </div>
                   </div>
                 ))}
+                {chatMessages.length > 0 && !chatMessages[chatMessages.length - 1].isStreaming ? (
+                  <div className="flex justify-start">
+                    <div className="max-w-[88%]">
+                      <PredictiveQuestions
+                        context={chatMessages[chatMessages.length - 1].content}
+                        language={language}
+                        onAsk={(q) => {
+                          setSearchQuery(q);
+                          followUpInputRef.current?.focus();
+                        }}
+                      />
+                    </div>
+                  </div>
+                ) : null}
 
                 {isQuerying && !chatMessages.some((msg) => msg.isStreaming) ? (
                   <div className="flex justify-start">
@@ -2781,26 +2910,16 @@ export default function InformationLookup() {
                     onKeyDown={(e) => e.key === "Enter" && void handleSearch()}
                     className="flex-1 bg-transparent px-2 py-1.5 text-sm text-foreground outline-none placeholder:text-muted"
                   />
-                  <button
-                    onClick={handleVoiceInput}
-                    disabled={isQuerying && !isVoiceProcessing}
-                    title={getVoiceHelperText()}
-                    className={`inline-flex items-center justify-center rounded-[6px] border px-2 ${
-                      isListening
-                        ? "border-danger bg-danger text-white"
-                        : isVoiceProcessing
-                          ? "border-[#ffd329] bg-[#ffd329] text-[#232323]"
-                          : isVoicePlaying
-                            ? "border-secondary bg-secondary text-white"
-                            : "border-border bg-white text-muted hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
-                    }`}
-                  >
-                    {isVoicePlaying ? (
-                      <StopSquareIcon className="h-4 w-4" />
-                    ) : (
-                      <MicPulseIcon className="h-4 w-4" />
-                    )}
-                  </button>
+                  <VoiceMicButton
+                    scope="general"
+                    language="auto"
+                    onSubmit={async (payload: VoiceMicSubmitPayload) => {
+                      setSearchQuery(payload.text);
+                      await handleSearch(payload.text);
+                    }}
+                    size="sm"
+                    variant="circle"
+                  />
                   <Button
                     variant="primary"
                     size="sm"
@@ -2873,19 +2992,20 @@ export default function InformationLookup() {
                           </div>
                           <div className="p-3">
                             <div className="relative overflow-hidden rounded-[10px] border border-border bg-white">
-                              <img
-                                src={pageImageUrl}
-                                alt={`${activeCitation?.documentCode || "Document"} page ${activeCitation?.pageStart || 1}`}
-                                className="block h-auto w-full"
-                                onLoad={(event) =>
-                                  setPageImageSize({
-                                    width:
-                                      event.currentTarget.naturalWidth || 1,
-                                    height:
-                                      event.currentTarget.naturalHeight || 1,
-                                  })
-                                }
-                              />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={pageImageUrl}
+                alt={`${activeCitation?.documentCode || "Document"} page ${activeCitation?.pageStart || 1}`}
+                className="block h-auto w-full"
+                onLoad={(event) =>
+                  setPageImageSize({
+                    width:
+                      event.currentTarget.naturalWidth || 1,
+                    height:
+                      event.currentTarget.naturalHeight || 1,
+                  })
+                }
+              />
                               {pageImageSize
                                 ? highlightBoxes.map((box, index) => (
                                     <div

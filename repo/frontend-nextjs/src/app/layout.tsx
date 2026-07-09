@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Figtree, Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
+import { LatencyMonitorOverlay } from "@/lib/latencyTracker";
 
 const figtree = Figtree({
   subsets: ["latin"],
@@ -38,7 +39,7 @@ export default function RootLayout({
       <body
         className={`${figtree.variable} ${geistSans.variable} ${geistMono.variable} min-h-full bg-background text-foreground`}
       >
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>{children}<LatencyMonitorOverlay /></AuthProvider>
       </body>
     </html>
   );

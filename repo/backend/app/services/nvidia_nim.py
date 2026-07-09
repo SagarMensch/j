@@ -59,6 +59,14 @@ def _extract_json_object(content: str) -> dict[str, Any] | None:
     return parsed if isinstance(parsed, dict) else None
 
 
+def _truncate_to_tokens(text: str, max_tokens: int = 480) -> str:
+    """Rough truncation: ~3.5 chars per token for English."""
+    max_chars = int(max_tokens * 3.5)
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars]
+
+
 def embed_texts_nvidia(
     texts: list[str],
     *,
@@ -71,17 +79,22 @@ def embed_texts_nvidia(
     if not settings.has_nvidia_embedding_credentials:
         return None
 
+    truncated = [_truncate_to_tokens(t) for t in texts]
+
     try:
         with httpx.Client(timeout=settings.NVIDIA_HTTP_TIMEOUT_SECONDS) as client:
+            payload = {
+                "model": settings.NVIDIA_EMBED_MODEL,
+                "input": truncated,
+                "encoding_format": "float",
+            }
+            if input_type:
+                payload["input_type"] = input_type
+
             response = client.post(
                 _embedding_url(settings.NVIDIA_API_BASE_URL),
                 headers=_json_headers(settings.NVIDIA_EMBED_API_KEY),
-                json={
-                    "model": settings.NVIDIA_EMBED_MODEL,
-                    "input": texts,
-                    "input_type": input_type,
-                    "encoding_format": "float",
-                },
+                json=payload,
             )
             response.raise_for_status()
             payload = response.json()

@@ -1,0 +1,23 @@
+
+> jubilant-ingrevia-frontend@0.1.0 dev
+> next dev
+
+   ▲ Next.js 15.5.14
+   - Local:        http://localhost:3000
+   - Network:      http://172.21.48.1:3000
+   - Environments: .env.local
+
+ ✓ Starting...
+ ✓ Ready in 7.7s
+ ○ Compiling / ...
+<w> [webpack.cache.PackFileCacheStrategy] Caching failed for pack: RangeError: Array buffer allocation failed
+ ✓ Compiled / in 36.4s (667 modules)
+ GET / 200 in 43336ms
+ ○ Compiling /favicon.ico ...
+ ✓ Compiled /favicon.ico in 862ms (400 modules)
+ GET /favicon.ico 200 in 1370ms
+ ○ Compiling /operator/dashboard ...
+[RangeError: Array buffer allocation failed]
+ ⨯ uncaughtException: [RangeError: Array buffer allocation failed]
+ ⨯ uncaughtException:  [RangeError: Array buffer allocation failed]
+[?25h

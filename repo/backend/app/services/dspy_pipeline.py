@@ -6,7 +6,7 @@ from app.core.config import get_settings
 
 try:
     import dspy
-except ImportError:  # pragma: no cover - optional until dependencies are installed
+except ImportError:
     dspy = None
 
 
@@ -30,15 +30,6 @@ class RetrievedPassage:
 
 
 class HybridRetriever:
-    """
-    Contract for the retrieval layer.
-
-    The implementation should combine:
-    - lexical retrieval (BM25/rank-bm25 or a learned BM25 variant),
-    - semantic retrieval (SBERT/MiniLM embeddings),
-    - metadata filters (role, site, document type, revision status).
-    """
-
     def search(self, query: str, top_k: int = 5, filters: dict[str, Any] | None = None) -> list[RetrievedPassage]:
         raise NotImplementedError
 
@@ -47,17 +38,55 @@ def build_signatures():
     dsp = ensure_dspy()
 
     class RewriteQuery(dsp.Signature):
-        """Convert an operator question into a retrieval-focused search query."""
+        """You are a search query optimizer for an industrial plant assistant. 
+Given an operator's question and conversation history, produce a search query that will 
+maximize retrieval of relevant SOP, manual, and safety document passages. 
+Focus on: equipment names, chemical names, procedure codes, alarm IDs, safety keywords.
+If the question uses pronouns (it, this, that), resolve them using the conversation history."""
 
         question = dsp.InputField()
         history = dsp.InputField()
         language = dsp.InputField()
         role = dsp.InputField()
-        rewritten_query = dsp.OutputField()
-        retrieval_hints = dsp.OutputField()
+        rewritten_query = dsp.OutputField(desc="A standalone, retrieval-optimized search query with resolved references")
+        retrieval_hints = dsp.OutputField(desc="Key entities and keywords to prioritize in retrieval")
 
     class GroundedAnswer(dsp.Signature):
-        """Answer only from approved SOP/SMP/WID context and cite the evidence."""
+        """You are an expert plant operations assistant for Jubilant Ingrevia. You help operators find, understand, and apply information from approved plant documents. You think deeply about what the operator really needs.
+
+## How to Think About Questions
+- What is the operator trying to accomplish? What is their real goal?
+- What evidence directly answers this?
+- Are there safety implications they should know?
+- What follow-up questions might they have?
+
+## Response Guidelines
+- Lead with the answer. Don't bury it in preamble.
+- For procedural questions: list steps in exact order with safety notes
+- For safety questions: ALWAYS include ALL warnings, PPE requirements, and hazards
+- For summary requests: organize into clear numbered points, most critical first
+- For 'why' questions: explain the reasoning behind procedures
+- Preserve EXACT values, units, tolerances, chemical names, equipment codes
+- Use citation markers [1], [2] at end of relevant points
+- If evidence doesn't answer the question, say so clearly. Never guess.
+- Adapt response depth to question complexity
+
+## Formatting
+- No markdown (no bold, no headers, no tables)
+- No raw document metadata
+- Plain text with natural paragraph breaks
+- Numbered lists for steps or multiple items
+
+## Examples of Excellent Answers
+
+Question: What PPE is required for handling chromic acid?
+Evidence: [1] WID-CHEM-003 p.2 — Chromic acid handling requires: chemical-resistant suit (Tyvek), double nitrile gloves, face shield with ANSI Z87.1 goggles, respirator with OV/P100 cartridges. TLV: 0.0002 mg/m3.
+Answer: Working with chromic acid requires strict PPE due to its highly corrosive and carcinogenic nature:
+1. Chemical-resistant suit — Tyvek or equivalent full-body coverage [1]
+2. Double nitrile gloves — wear two layers for added protection [1]
+3. Face shield with ANSI Z87.1-rated safety goggles [1]
+4. Respirator with OV/P100 cartridges — required due to the extremely low ceiling limit of 0.0002 mg/m3 [1]
+Never attempt to handle chromic acid without complete PPE."""
 
         question = dsp.InputField()
         history = dsp.InputField()
@@ -65,22 +94,34 @@ def build_signatures():
         role = dsp.InputField()
         context = dsp.InputField()
         answer = dsp.OutputField()
-        citations = dsp.OutputField()
-        confidence = dsp.OutputField()
+        citations = dsp.OutputField(desc="Comma-separated citation references like [1], [2]")
+        confidence = dsp.OutputField(desc="high/medium/low based on evidence quality and coverage")
 
     class VerifyGrounding(dsp.Signature):
-        """Check if the drafted answer is fully supported by the supplied passages."""
+        """You are a fact-checker verifying that an answer is grounded in the provided evidence.
+
+Check the answer against the evidence. Flag ONLY clear hallucinations — information that is completely fabricated and contradicts the evidence.
+
+Do NOT flag:
+- Reasonable inferences from the evidence
+- Paraphrased information that is semantically equivalent to the evidence
+- General safety advice consistent with the evidence
+- Minor rewording of evidence content
+
+Return supported=true unless there is a clear factual error or fabrication."""
 
         question = dsp.InputField()
         draft_answer = dsp.InputField()
         citations = dsp.InputField()
         context = dsp.InputField()
-        supported = dsp.OutputField()
-        safety_note = dsp.OutputField()
-        revision_needed = dsp.OutputField()
+        supported = dsp.OutputField(desc="true if fully supported, false if hallucinated or incorrect")
+        safety_note = dsp.OutputField(desc="Any safety concerns about the answer")
+        revision_needed = dsp.OutputField(desc="Specific corrections needed if answer is unsupported")
 
     class GenerateTrainingStep(dsp.Signature):
-        """Extract one clear guided training step from approved procedure text."""
+        """Extract one clear, actionable training step from approved procedure text.
+The step should be: specific, measurable, achievable, relevant, and time-bound (SMART).
+Include safety requirements, PPE, and verification checks where applicable."""
 
         procedure_title = dsp.InputField()
         step_context = dsp.InputField()
@@ -90,7 +131,9 @@ def build_signatures():
         operator_check = dsp.OutputField()
 
     class GenerateAssessmentQuestion(dsp.Signature):
-        """Create one grounded assessment question from validated training content."""
+        """Create one grounded assessment question from validated training content.
+Question should test practical understanding, not just memorization.
+Include realistic distractors that reflect common operator mistakes."""
 
         module_title = dsp.InputField()
         learning_summary = dsp.InputField()
@@ -110,16 +153,6 @@ def build_signatures():
 
 
 class GroundedPlantAssistant:
-    """
-    DSPy program for the Query Assistant + Document Viewer screen.
-
-    Design choices based on the markdown papers in the workspace:
-    - DSPy paper: compile declarative modules instead of hand-written prompt strings.
-    - Sentence-BERT paper: use sentence embeddings for scalable semantic retrieval.
-    - MiniLM paper: prefer compact embedding/reranking models for latency-sensitive use.
-    - LambdaBM25 report: retain lexical retrieval for exact terminology, IDs, and plant jargon.
-    """
-
     def __init__(self, retriever: HybridRetriever):
         dsp = ensure_dspy()
         signatures = build_signatures()
@@ -186,10 +219,6 @@ def compile_grounded_assistant(
 
 
 class TrainingAndAssessmentFactory:
-    """
-    DSPy program fragments for the training, assessment, and admin screens.
-    """
-
     def __init__(self):
         dsp = ensure_dspy()
         signatures = build_signatures()
@@ -239,7 +268,7 @@ def _history_to_text(history: list[dict[str, str]] | None) -> str:
     if not history:
         return "No prior conversation."
     lines: list[str] = []
-    for item in history[-8:]:
+    for item in history[-12:]:
         role = (item.get("role") or "user").strip().title()
         content = (item.get("content") or "").strip()
         if content:
@@ -251,7 +280,7 @@ def _evidence_to_context(evidence: list[dict[str, Any]]) -> str:
     if not evidence:
         return "No approved evidence found."
     blocks: list[str] = []
-    for index, item in enumerate(evidence[:5], start=1):
+    for index, item in enumerate(evidence[:8], start=1):
         line_start = item.get("line_start")
         line_end = item.get("line_end")
         line_label = ""

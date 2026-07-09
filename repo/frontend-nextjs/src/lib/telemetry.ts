@@ -39,13 +39,17 @@ export function trackEvent(
     metadata,
   };
 
-  // Log in development
   if (process.env.NODE_ENV === "development") {
     console.log(`[Telemetry] ${event}`, payload);
   }
 
-  // TODO: Send to telemetry backend
-  // await fetch('/api/telemetry', { method: 'POST', body: JSON.stringify({ event, ...payload }) });
+  void fetch("/api/telemetry", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ event, ...payload }),
+  }).catch(() => {
+    // telemetry is non-critical - silently ignore network failures
+  });
 }
 
 function getStoredUserId(): string {
